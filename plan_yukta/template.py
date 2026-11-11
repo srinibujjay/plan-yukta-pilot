@@ -86,7 +86,7 @@ def build_workbook(data: dict | None, path: str, formula_rows: int | None = None
     ws.column_dimensions['A'].width = 110
     lines = [
         ('Plan Yukta pilot workbook', _font(size=16, bold=True, color='1F3A5F')),
-        ('Supply-chain visibility for fabless semiconductor products: fab WIP, fab shipments, OSAT WIP by operation, E&O and a gross-die capacity check.', _font()),
+        ('Supply-chain visibility and planning for fabless semiconductor products: WIP across fab and OSAT, demand forecast, module-level supply plan, tester capacity and the monthly FAB/OSAT forecast package.', _font()),
         ('', None),
         ('How to use it', _font(size=12, bold=True)),
         ('1. Settings: set the as-of date and thresholds (yellow cells).', _font()),
@@ -94,7 +94,8 @@ def build_workbook(data: dict | None, path: str, formula_rows: int | None = None
         ('3. Name_Map: every name your fab and OSAT use for each product. SOURCE is FAB or OSAT. One OSAT name may map to several products (e.g. a bare family name); the web app resolves it through fab lot numbers.', _font()),
         ('4. Fab_WIP, Fab_Shipments, OSAT_WIP: paste your reports under the headers. Common vendor headings such as "Lot ID", "Customer Product" or "Shipped Quantity" are accepted by the web app.', _font()),
         ('5. OSAT_WIP holds one or more daily snapshots stacked together, marked by SNAPSHOT_DATE. More history gives better de-duplication and lead times.', _font()),
-        ('6. Summary recalculates in Excel. For de-duplicated OSAT figures, resolved part names and lot lead times, upload this file to the Plan Yukta web app.', _font()),
+        ('6. For planning: Demand (monthly actuals and customer forecast), Plan_Params (yields, cycle times, lot size, stock), Tester_Params and Tester_Capacity. Planning settings are at the bottom of Settings.', _font()),
+        ('7. Summary and Plan_Quick recalculate in Excel. For de-duplicated OSAT figures, resolved part names and lot lead times, upload this file to the Plan Yukta web app.', _font()),
         ('', None),
         ('Cell colours', _font(size=12, bold=True)),
         ('Yellow header = input column you fill in. Grey header = formula column, do not edit. Blue text = your data. Grey italic row = example to overwrite or delete.', _font()),
@@ -126,6 +127,10 @@ def build_workbook(data: dict | None, path: str, formula_rows: int | None = None
         ('Do the numbers add up?', 'Summary "Capacity check": active WIP in dies against wafers shipped x gross die per wafer.'),
         ('Can I trust the OSAT numbers?', 'Upload this workbook to the web app: it removes rows the OSAT report counts twice and lists each one with the reason.'),
         ('How long do my lots take?', 'Web app "Lot lead time": process and wait days per stage for every mother lot.'),
+        ('How much will customers need?', 'Demand sheet (history and customer forecast); web app "Forecast" adds a statistical forecast with accuracy.'),
+        ('What must I start, and where?', 'Plan_Quick gives gross wafer starts by month; web app "Supply plan" nets stock and WIP and loads every module.'),
+        ('Will the testers cope?', 'Tester_Params throughput and Tester_Capacity hours; web app "Testers" shows utilisation by month.'),
+        ('What do I send FAB and OSAT?', 'Web app "B2B package": rolling forecasts with time fences and a commit sheet to download.'),
     ]
     for r, (q, a) in enumerate(guide, start=3):
         qa = ws.cell(row=r, column=1, value=q); ab = ws.cell(row=r, column=2, value=a)
@@ -144,7 +149,10 @@ def build_workbook(data: dict | None, path: str, formula_rows: int | None = None
         ('Settings → As-of date + E&O age', 'Move the date a year ahead and set the age to 6 months to see how today\'s WIP turns into ageing risk.'),
         ('Fab_Shipments', 'Delete a shipment row. Wafers shipped falls and the capacity check may flag the product.'),
         ('Products', 'Change a gross die per wafer value and see the capacity figures move.'),
-        ('Then', 'Upload the workbook to the web app to compare the de-duplicated figures and the removed-row audit.'),
+        ('Settings → Demand uplift %', 'Set 40. Plan_Quick shows the gross wafer starts rising; the web app also shows the tester overload this creates.'),
+        ('Plan_Params', 'Lower a sort yield or raise a fab cycle time; Plan_Quick and the web app plan respond.'),
+        ('Tester_Params / Tester_Capacity', 'Change test time, sites or tester count; throughput and hours available recalculate.'),
+        ('Then', 'Upload the workbook to the web app for the full plan: de-duplicated WIP, forecast, module-level supply plan, tester capacity and the B2B package.'),
     ]
     for r, (where, what) in enumerate(tries, start=start + 1):
         ws.cell(row=r, column=1, value=where).font = _font(bold=True)
@@ -165,6 +173,14 @@ def build_workbook(data: dict | None, path: str, formula_rows: int | None = None
         ('Capacity tolerance', 1.05, 'Allowed headroom when comparing active WIP with shipped wafers x GDW.'),
         ('E&O cutoff date (calc)', '=B2-30*B3', 'Formula: as-of date minus months x 30.'),
         ('Baseline bin number (calc)', '=IFERROR(VALUE(SUBSTITUTE(UPPER(B4),"BIN","")),1)', 'Formula: the number in the baseline bin.'),
+        ('Plan start month', data['plan_start'] if data else '=DATE(YEAR(TODAY()),MONTH(TODAY()),1)', 'First month of the forecast and supply plan (use the 1st of the month).'),
+        ('Horizon (months)', 12, 'How many months to plan, 3 to 18.'),
+        ('Frozen months', 1, 'B2B time fence: firm orders, no changes.'),
+        ('Slushy months', 3, 'B2B time fence after the frozen months: changes within agreed flex.'),
+        ('Forecast method', 'BLEND', 'CUSTOMER = customer forecast, STAT = statistical, BLEND = average of the two.'),
+        ('Demand uplift %', 0, 'Scenario lever applied to final demand, e.g. 15 or -10.'),
+        ('Smoothing alpha', 0.35, 'Statistical forecast: weight on the latest level (0.1 to 0.9).'),
+        ('Smoothing beta', 0.15, 'Statistical forecast: weight on the latest trend (0.05 to 0.5).'),
     ]
     for i, (k, v, note) in enumerate(rows, start=2):
         ws.cell(row=i, column=1, value=k).font = _font(bold=True)
@@ -177,6 +193,9 @@ def build_workbook(data: dict | None, path: str, formula_rows: int | None = None
     ws['B2'].number_format = 'yyyy-mm-dd'
     ws['B6'].number_format = 'yyyy-mm-dd'
     ws['B5'].number_format = '0.00'
+    ws['B8'].number_format = 'yyyy-mm'
+    dv_m = DataValidation(type='list', formula1='"BLEND,CUSTOMER,STAT"', allow_blank=False)
+    ws.add_data_validation(dv_m); dv_m.add('B12')
 
     # -------------------------------------------------------------- Products
     ws = wb.create_sheet('Products')
@@ -393,5 +412,130 @@ def build_workbook(data: dict | None, path: str, formula_rows: int | None = None
             ws[f'{col}{r}'].font = _font()
     ws.freeze_panes = 'B5'
 
+    _planning_sheets(wb, data)
     wb.save(path)
     return path
+
+
+# ------------------------------------------------------------------ planning sheets
+PLAN_COLS = ['PRODUCT', 'GDW', 'FAB_LINE_YIELD', 'SORT_YIELD', 'ASSY_YIELD', 'FT_YIELD',
+             'CT_FAB_WK', 'CT_BUMP_WK', 'CT_SORT_WK', 'CT_ASSY_WK', 'CT_FT_WK',
+             'WAFER_LOT', 'SAFETY_STOCK_WK', 'FG_ON_HAND', 'DIE_BANK_ON_HAND']
+TESTER_COLS = ['PRODUCT', 'INSERTION', 'TESTER_TYPE', 'TEST_TIME_S', 'SITES', 'INDEX_TIME_S',
+               'STEPPING_EFF', 'WAFER_LOAD_S']
+CAP_COLS = ['TESTER_TYPE', 'OSAT', 'QTY_TESTERS', 'HOURS_PER_WEEK', 'OEE']
+
+
+def _planning_sheets(wb, data):
+    example = data is None
+    # ---- Demand
+    ws = wb.create_sheet('Demand')
+    _header(ws, 1, ['PRODUCT', 'MONTH', 'TYPE', 'QTY'], widths=[16, 12, 12, 14])
+    ws['B1'].comment = Comment('First day of the month. Shown as yyyy-mm.', 'Plan Yukta')
+    ws['C1'].comment = Comment('ACTUAL = shipped to customers (history). FORECAST = customer forecast for future months.', 'Plan Yukta')
+    if example:
+        rows = [('NOVA A0', date(2026, 9, 1), 'ACTUAL', 120000), ('NOVA A0', date(2026, 12, 1), 'FORECAST', 150000)]
+    else:
+        rows = [(r.PRODUCT, r.MONTH.to_pydatetime(), r.TYPE, r.QTY) for r in data['demand'].itertuples(index=False)]
+    _write_rows(ws, 2, rows, example=example)
+    for r in range(2, len(rows) + 2):
+        ws.cell(row=r, column=2).number_format = 'yyyy-mm'
+        ws.cell(row=r, column=4).number_format = '#,##0'
+    dv = DataValidation(type='list', formula1='"ACTUAL,FORECAST"', allow_blank=True)
+    ws.add_data_validation(dv); dv.add('C2:C5000')
+
+    # ---- Plan_Params
+    ws = wb.create_sheet('Plan_Params')
+    _header(ws, 1, PLAN_COLS, widths=[14, 8, 10, 10, 10, 9, 9, 9, 9, 9, 8, 9, 10, 12, 14])
+    notes = {'A1': 'Master product, as on the Products sheet.', 'B1': 'Gross die per wafer.',
+             'C1': 'Fab line yield: share of started wafers that reach sort (0-1).',
+             'D1': 'Wafer sort (probe) die yield (0-1).', 'E1': 'Assembly yield (0-1).', 'F1': 'Final test yield (0-1).',
+             'G1': 'Cycle time in weeks per module. Put 0 for bump if the product is not bumped.',
+             'L1': 'Wafer starts are rounded up to this lot size.', 'M1': 'Finished-goods safety stock in weeks of demand.',
+             'N1': 'Finished goods on hand today (units).', 'O1': 'Sorted good die in the die bank today.'}
+    for c, t in notes.items():
+        ws[c].comment = Comment(t, 'Plan Yukta')
+    if example:
+        rows = [('NOVA A0', 8500, 0.98, 0.9, 0.99, 0.97, 12, 0, 2, 3, 2, 25, 4, 100000, 50000)]
+    else:
+        rows = [tuple(r) for r in data['plan_params'][PLAN_COLS].itertuples(index=False)]
+    _write_rows(ws, 2, rows, example=example)
+
+    # ---- Tester_Params
+    ws = wb.create_sheet('Tester_Params')
+    _header(ws, 1, TESTER_COLS + ['SECONDS PER UNIT/WAFER (calc)', 'THROUGHPUT PER HOUR (calc)'], calc_from=9,
+            widths=[14, 10, 14, 12, 7, 12, 13, 13, 18, 16])
+    for c, t in {'B1': 'CP1, CP2 ... = wafer sort; FT1, FT2 ... = final test.',
+                 'D1': 'Test time per touchdown, seconds.', 'E1': 'Devices tested in parallel.',
+                 'F1': 'Handler or prober index time per touchdown, seconds.',
+                 'G1': 'Wafer sort only: share of touchdowns that are useful (edge loss, 0-1).',
+                 'H1': 'Wafer sort only: load, align and unload time per wafer, seconds.'}.items():
+        ws[c].comment = Comment(t, 'Plan Yukta')
+    if example:
+        rows = [('NOVA A0', 'FT1', 'FT-ATE', 2.5, 4, 0.5, None, None)]
+    else:
+        rows = [tuple(None if (isinstance(v, float) and pd.isna(v)) else v for v in r)
+                for r in data['tester_params'][TESTER_COLS].itertuples(index=False)]
+    _write_rows(ws, 2, rows, example=example)
+    last = max(200, len(rows) + 1)
+    _fill_formulas(ws, 2, last, {
+        'I': ('=IF(A{r}="","",IF(OR(LEFT(UPPER(B{r}),2)="CP",LEFT(UPPER(B{r}),2)="WS"),'
+              'ROUNDUP(IFERROR(INDEX(Plan_Params!$B:$B,MATCH(A{r},Plan_Params!$A:$A,0)),0)/MAX(1,E{r}),0)'
+              '/IF(N(G{r})=0,1,G{r})*(D{r}+N(F{r}))+N(H{r}),(D{r}+N(F{r}))/MAX(1,E{r})))'),
+        'J': '=IF(OR(A{r}="",N(I{r})=0),"",3600/I{r})',
+    }, fmt={'I': '0.000', 'J': '#,##0.0'})
+
+    # ---- Tester_Capacity
+    ws = wb.create_sheet('Tester_Capacity')
+    _header(ws, 1, CAP_COLS + ['HOURS AVAILABLE PER MONTH (calc)'], calc_from=6, widths=[14, 16, 12, 15, 8, 22])
+    ws['E1'].comment = Comment('Overall equipment effectiveness (0-1): the share of scheduled hours that produce good tests.', 'Plan Yukta')
+    if example:
+        rows = [('FT-ATE', 'OSAT test site', 1, 150, 0.7)]
+    else:
+        rows = [tuple(r) for r in data['tester_capacity'][CAP_COLS].itertuples(index=False)]
+    _write_rows(ws, 2, rows, example=example)
+    _fill_formulas(ws, 2, 50, {'F': '=IF(A{r}="","",C{r}*D{r}*52/12*E{r})'}, fmt={'F': '#,##0'})
+
+    # ---- Plan_Quick: formula-only planning view
+    ws = wb.create_sheet('Plan_Quick', 2)
+    ws['A1'] = 'Plan Quick (Excel formulas)'
+    ws['A1'].font = _font(size=14, bold=True, color='1F3A5F')
+    ws['A2'] = ('Gross wafer starts needed for each month\'s demand, before netting inventory and WIP. '
+                'The web app nets stock, offsets lead times, plans the die bank and checks testers.')
+    ws['A2'].font = _font(italic=True, color='595959')
+    heads = ['Product', 'Units per wafer', 'Good die per wafer', 'Lead time (weeks)', 'Wafer lot']
+    for i, h in enumerate(heads, start=1):
+        c = ws.cell(row=4, column=i, value=h)
+        c.font = _font(bold=True, color='FFFFFF'); c.fill = HEAD_FILL; c.alignment = Alignment(wrap_text=True)
+    for j in range(18):
+        col = 6 + j
+        c = ws.cell(row=4, column=col,
+                    value=f'=IF({j + 1}>Settings!$B$9,"",EDATE(Settings!$B$8,{j}))')
+        c.number_format = 'yyyy-mm'
+        c.font = _font(bold=True, color='FFFFFF'); c.fill = HEAD_FILL
+        ws.column_dimensions[get_column_letter(col)].width = 9
+    for i in range(MAX_PRODUCTS):
+        r = 5 + i
+        pp = i + 2
+        ws[f'A{r}'] = f'=IF(Plan_Params!A{pp}="","",Plan_Params!A{pp})'
+        ws[f'B{r}'] = (f'=IF(A{r}="","",Plan_Params!B{pp}*Plan_Params!C{pp}*Plan_Params!D{pp}'
+                       f'*Plan_Params!E{pp}*Plan_Params!F{pp})')
+        ws[f'C{r}'] = f'=IF(A{r}="","",Plan_Params!B{pp}*Plan_Params!C{pp}*Plan_Params!D{pp})'
+        ws[f'D{r}'] = f'=IF(A{r}="","",SUM(Plan_Params!G{pp}:K{pp}))'
+        ws[f'E{r}'] = f'=IF(A{r}="","",Plan_Params!L{pp})'
+        for col in 'BC':
+            ws[f'{col}{r}'].number_format = '#,##0'
+        for j in range(18):
+            cl = get_column_letter(6 + j)
+            ws[f'{cl}{r}'] = (f'=IF(OR($A{r}="",{cl}$4=""),"",IFERROR(CEILING(SUMIFS(Demand!$D:$D,Demand!$A:$A,$A{r},'
+                              f'Demand!$B:$B,{cl}$4,Demand!$C:$C,"FORECAST")*(1+Settings!$B$13/100)/$B{r},$E{r}),0))')
+            ws[f'{cl}{r}'].number_format = '#,##0;-#,##0;-'
+        for col in range(1, 24):
+            ws.cell(row=r, column=col).font = _font()
+    for col, w in zip('ABCDE', (14, 11, 11, 10, 8)):
+        ws.column_dimensions[col].width = w
+    note = 5 + MAX_PRODUCTS + 1
+    ws[f'A{note}'] = ('Wafers = CEILING(customer forecast x (1 + uplift) / units per wafer, wafer lot). '
+                      'Units per wafer = GDW x line yield x sort yield x assembly yield x final test yield.')
+    ws[f'A{note}'].font = _font(italic=True, color='595959')
+    ws.freeze_panes = 'F5'

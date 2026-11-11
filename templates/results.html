@@ -1,5 +1,6 @@
 {% extends 'base.html' %}
-{% block title %}Plan Yukta · results{% endblock %}
+{% block title %}Plan Yukta · results{% include '_planning.html' %}
+{% endblock %}
 
 {% macro table(t, wrap_col=-1, empty='Nothing to show.') -%}
   {% if t.rows %}
@@ -45,7 +46,10 @@
   <span class="mono">{{ res.unmapped_partnames|join(', ') }}</span>. Add them to Name_Map, or check that their mother lots appear in the fab files.</div>
 {% endif %}
 
-<div class="kpis" style="margin-top:18px">
+<nav class="subnav">
+  <a href="#now">Material now</a>{% if plan %}<a href="#forecast">Forecast</a><a href="#supply">Supply plan</a><a href="#testers">Testers</a><a href="#b2b">B2B package</a>{% endif %}
+</nav>
+<div class="kpis" style="margin-top:18px" id="now">
   {% for label, value, hint in kpis %}
   <div class="kpi"><div class="label">{{ label }}</div><div class="value">{{ value }}</div><div class="hint">{{ hint }}</div></div>
   {% endfor %}
@@ -112,4 +116,5 @@
     {{ table(binning) }}
   </section>
 </div>
+{% include '_planning.html' %}
 {% endblock %}

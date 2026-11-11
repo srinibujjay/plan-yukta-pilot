@@ -187,7 +187,65 @@ def build():
                      'Projected Out Date': FIRST_SNAPSHOT + timedelta(days=35)})
     fab = pd.DataFrame(fab_rows)
 
-    return {'as_of': AS_OF, 'product_map': PRODUCT_MAP, 'fab_wip': fab, 'fab_ship': ship, 'osat_wip': osat}
+    return {'as_of': AS_OF, 'product_map': PRODUCT_MAP, 'fab_wip': fab, 'fab_ship': ship, 'osat_wip': osat,
+            **planning_inputs()}
+
+
+def planning_inputs():
+    """Demand history, customer forecast and planning parameters for the planning modules."""
+    import math as _m
+    rng = random.Random(11)
+    first_hist = pd.Timestamp(2024, 11, 1)          # 24 months of actuals up to Oct 2026
+    plan_start = pd.Timestamp(2026, 11, 1)
+    rows = []
+    for i in range(24):
+        m = first_hist + pd.DateOffset(months=i)
+        season = 1 + 0.08 * _m.sin(2 * _m.pi * (m.month - 3) / 12)
+        a0 = max(0, 260_000 - 7_000 * i) * season * rng.uniform(0.93, 1.07)              # older revision, declining
+        b0 = (0 if i < 8 else 40_000 + 16_000 * (i - 8)) * season * rng.uniform(0.92, 1.08)  # new revision ramping
+        vg = 300_000 * season * rng.uniform(0.9, 1.1)                                       # steady product
+        for prod, q in (('ORION A0', a0), ('ORION B0', b0), ('VEGA A0', vg)):
+            rows.append((prod, m, 'ACTUAL', round(q, -2)))
+    customer = {   # customer forecasts for the next six months (not every month is covered)
+        'ORION A0': [95_000, 90_000, 80_000, 70_000, 60_000, 50_000],
+        'ORION B0': [300_000, 340_000, 380_000, 420_000, 460_000, 500_000],
+        'VEGA A0': [310_000, 320_000, 300_000, None, None, None],
+    }
+    for prod, qs in customer.items():
+        for i, q in enumerate(qs):
+            if q is not None:
+                rows.append((prod, plan_start + pd.DateOffset(months=i), 'FORECAST', q))
+    demand = pd.DataFrame(rows, columns=['PRODUCT', 'MONTH', 'TYPE', 'QTY'])
+
+    plan_params = pd.DataFrame([
+        # PRODUCT, GDW, yields: line, sort, assy, FT; cycle time weeks: fab, bump, sort, assy, FT;
+        # wafer lot, safety stock weeks, FG on hand, die bank on hand
+        ('ORION A0', 8200, 0.98, 0.90, 0.995, 0.97, 12, 0, 2, 3, 2, 25, 4, 150_000, 250_000),
+        ('ORION B0', 8200, 0.97, 0.86, 0.99, 0.95, 12, 0, 2, 3, 2, 25, 4, 650_000, 1_100_000),
+        ('VEGA A0', 21500, 0.98, 0.92, 0.995, 0.98, 14, 3, 2, 3, 2, 25, 6, 700_000, 1_400_000),
+    ], columns=['PRODUCT', 'GDW', 'FAB_LINE_YIELD', 'SORT_YIELD', 'ASSY_YIELD', 'FT_YIELD',
+                'CT_FAB_WK', 'CT_BUMP_WK', 'CT_SORT_WK', 'CT_ASSY_WK', 'CT_FT_WK',
+                'WAFER_LOT', 'SAFETY_STOCK_WK', 'FG_ON_HAND', 'DIE_BANK_ON_HAND'])
+
+    tester_params = pd.DataFrame([
+        # PRODUCT, INSERTION, TESTER_TYPE, TEST_TIME_S, SITES, INDEX_TIME_S, STEPPING_EFF, WAFER_LOAD_S
+        ('ORION A0', 'CP1', 'Sort-ATE-A', 1.10, 16, 0.40, 0.92, 90),
+        ('ORION A0', 'FT1', 'FT-ATE-B', 2.4, 4, 0.5, None, None),
+        ('ORION B0', 'CP1', 'Sort-ATE-A', 1.30, 16, 0.40, 0.92, 90),
+        ('ORION B0', 'FT1', 'FT-ATE-B', 4.0, 4, 0.5, None, None),
+        ('ORION B0', 'FT2', 'FT-ATE-B', 2.5, 4, 0.5, None, None),
+        ('VEGA A0', 'CP1', 'Sort-ATE-A', 0.70, 32, 0.40, 0.90, 90),
+        ('VEGA A0', 'FT1', 'FT-ATE-B', 2.2, 4, 0.5, None, None),
+    ], columns=['PRODUCT', 'INSERTION', 'TESTER_TYPE', 'TEST_TIME_S', 'SITES', 'INDEX_TIME_S',
+                'STEPPING_EFF', 'WAFER_LOAD_S'])
+
+    tester_capacity = pd.DataFrame([
+        ('Sort-ATE-A', 'OSAT-1 Test', 1, 150, 0.75),
+        ('FT-ATE-B', 'OSAT-1 Test', 1, 140, 0.70),
+    ], columns=['TESTER_TYPE', 'OSAT', 'QTY_TESTERS', 'HOURS_PER_WEEK', 'OEE'])
+
+    return {'demand': demand, 'plan_params': plan_params, 'tester_params': tester_params,
+            'tester_capacity': tester_capacity, 'plan_start': plan_start.date()}
 
 
 if __name__ == '__main__':

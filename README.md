@@ -1,6 +1,12 @@
 # Plan Yukta — pilot
 
-Plan Yukta is a small web app and Excel template that give a fabless semiconductor company one clean view of its material: fab WIP, fab shipments, OSAT WIP by operation (with duplicate rows removed), excess & obsolete stock, a gross-die capacity check and lot lead times.
+Plan Yukta is a web app and Excel template for fabless semiconductor supply chain teams. It runs five modules together:
+
+1. **Material now.** Fab and OSAT WIP with duplicate rows removed, E&O, a capacity check and lot lead times.
+2. **Demand forecast.** A statistical forecast blended with customer forecasts, with accuracy and bias.
+3. **Module-level supply plan.** MRP netting through fab, bump, sort, assembly and final test.
+4. **Tester (ATE) capacity.** Tester hours needed against hours available, by month.
+5. **Monthly B2B package.** Rolling FAB and OSAT forecasts with time fences and a commit sheet.
 
 [CALCULATIONS.md](CALCULATIONS.md) sets out every formula. The same text appears in the app under **How it calculates**.
 
@@ -9,7 +15,8 @@ Plan Yukta is a small web app and Excel template that give a fabless semiconduct
 | Path | What it is |
 |---|---|
 | `app.py` | Flask app. Download the template, upload a workbook, see the results, download them as .xlsx. |
-| `plan_yukta/engine.py` | The calculations. Works on plain DataFrames, with no database. |
+| `plan_yukta/engine.py` | Material-now calculations. Works on plain DataFrames, with no database. |
+| `plan_yukta/planning.py` | Forecast, module-level supply plan, tester capacity and the B2B package. |
 | `plan_yukta/osat_transfer_dedup.py` | The dashboard's OSAT de-duplication rules, copied unchanged. |
 | `plan_yukta/template.py` | Builds the Excel template. Its Summary sheet is live formulas. |
 | `sample/make_sample.py` | Generates the synthetic sample data (invented products and lots). |

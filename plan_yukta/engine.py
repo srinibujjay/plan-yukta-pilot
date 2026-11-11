@@ -63,6 +63,7 @@ class Settings:
     eo_age_months: float = 24
     bin_baseline: str = 'BIN1'
     capacity_tolerance: float = 1.05
+    plan_values: dict = field(default_factory=dict)   # planning settings rows, read by planning_inputs()
 
 
 class TemplateError(ValueError):
@@ -124,6 +125,7 @@ def read_workbook(source) -> dict:
                 settings.bin_baseline = str(values['E&O bin baseline']).strip().upper()
             if pd.notna(values.get('Capacity tolerance')):
                 settings.capacity_tolerance = float(values['Capacity tolerance'])
+            settings.plan_values = {k: v for k, v in values.items() if pd.notna(v)}
 
     products = _clean_headers(sheets['Products'])
     names = _clean_headers(sheets['Name_Map'])
@@ -155,8 +157,18 @@ def read_workbook(source) -> dict:
     if osat.empty:
         raise TemplateError("Sheet 'OSAT_WIP' has no rows.")
 
+    planning = None
+    plan_sheets = ['Demand', 'Plan_Params', 'Tester_Params', 'Tester_Capacity']
+    if all(n in sheets for n in plan_sheets):
+        planning = {}
+        for key, n in zip(['demand', 'plan_params', 'tester_params', 'tester_capacity'], plan_sheets):
+            df = _clean_headers(sheets[n])
+            df = df[[c for c in df.columns if '(calc)' not in c and not c.startswith('Unnamed')]]
+            first = df.columns[0] if len(df.columns) else None
+            planning[key] = df[df[first].notna()].reset_index(drop=True) if first else df
+
     return {'settings': settings, 'product_map': pmap, 'fab_wip': fab_wip,
-            'fab_ship': fab_ship, 'osat_wip': osat}
+            'fab_ship': fab_ship, 'osat_wip': osat, 'planning': planning}
 
 
 # ---------------------------------------------------------------------------
