@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Plan Yukta pilot{% endblock %}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono&family=IBM+Plex+Sans:wght@400;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<header class="top">
+  <div class="wrap">
+    <a class="brand" href="{{ url_for('index') }}"><b>Plan Yukta</b><span>fabless supply-chain visibility · pilot</span></a>
+    <nav>
+      <a href="{{ url_for('guide') }}">What it does</a>
+      <a href="{{ url_for('index') }}">Run a plan</a>
+      <a href="{{ url_for('method') }}">How it calculates</a>
+      {% if feedback_url %}<a href="{{ feedback_url }}" target="_blank" rel="noopener">Give feedback</a>{% endif %}
+      {% if access_on and tester %}<a href="{{ url_for('logout') }}" title="Signed in as {{ tester }}">Sign out</a>{% endif %}
+    </nav>
+  </div>
+</header>
+<main><div class="wrap">{% block body %}{% endblock %}</div></main>
+<footer><div class="wrap">Pilot build for invited testers{% if tester %} · signed in as {{ tester }}{% endif %}. Uploads are processed in memory and not stored. Sample data is synthetic.</div></footer>
+</body>
+</html>

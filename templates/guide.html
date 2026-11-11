@@ -1,0 +1,72 @@
+{% extends 'base.html' %}
+{% block title %}What Plan Yukta does for you{% endblock %}
+{% block body %}
+<div class="guide">
+<h1>What Plan Yukta does for you</h1>
+<p class="lead">Every fabless supply chain team rebuilds the same picture each week from foundry and OSAT reports: where is every wafer, how many dies are really in each stage, what is late, what is ageing. Plan Yukta does that reconciliation for you, the same way every time, and shows its working.</p>
+
+<section class="panel">
+  <h2>How it works</h2>
+  <div class="flow">
+    <span>Foundry WIP report</span><span>Foundry shipments</span><span>OSAT daily WIP reports</span>
+    <i>→</i><span>Map supplier names to your products</span>
+    <i>→</i><span>Remove double-counted rows</span>
+    <i>→</i><span>One view, by product and stage</span>
+  </div>
+  <p class="muted small">You fill one Excel template, or paste your vendors' own reports into it, and upload it. Nothing is stored; results come back as a page and an Excel file.</p>
+</section>
+
+<div class="grid2">
+  <section class="panel">
+    <h2>Questions it answers</h2>
+    <ul>
+      <li><b>Where is my material right now?</b> Wafers at the foundry and in Sort and Bump; dies in Assembly, Test and Packing, per product.</li>
+      <li><b>Can I trust the OSAT numbers?</b> Rows the OSAT report lists twice (transfer, finished or stale rows) are removed, and each removal is shown with its reason.</li>
+      <li><b>Which foundry lots will be late?</b> Lots whose projected out date is after the committed date, with days late.</li>
+      <li><b>Is anything ageing or downgraded?</b> Excess &amp; obsolete stock by date code age and bin.</li>
+      <li><b>Do the numbers even add up?</b> A capacity check flags when OSAT WIP is more than the foundry could have shipped.</li>
+      <li><b>How long do my lots take?</b> Process and wait days per stage for every mother lot.</li>
+    </ul>
+  </section>
+  <section class="panel">
+    <h2>Who it is for</h2>
+    <ul>
+      <li><b>Supply chain and planning managers</b> preparing weekly WIP and output reviews.</li>
+      <li><b>Operations leads</b> chasing OSAT and foundry partners on late or stuck lots.</li>
+      <li><b>Finance and product teams</b> who need an E&amp;O view they can trace back to rows.</li>
+    </ul>
+    <h3>What it does not do (yet)</h3>
+    <p class="muted small">It does not forecast demand or plan wafer starts. It reconciles what your suppliers report today. Test yield and work-order scrap need live system connections and are not in the pilot.</p>
+  </section>
+</div>
+
+<section class="panel">
+  <h2>A 10-minute tour</h2>
+  <ol class="steps">
+    <li><b>Run the synthetic sample</b> from <a href="{{ url_for('index') }}">Run a plan</a>. It holds three invented products, six weeks of daily OSAT reports and a few deliberate problems.</li>
+    <li><b>Read the six tiles at the top.</b> They show where material sits and how many checks need your attention.</li>
+    <li><b>Open "Duplicate rows removed".</b> Each row shows which rule removed it and why, so you can check the logic against your own experience.</li>
+    <li><b>Look at the capacity check and late fab lots.</b> These are the items you would take to a supplier call.</li>
+    <li><b>Download the results workbook</b> and the sample workbook, and compare them side by side.</li>
+  </ol>
+</section>
+
+<section class="panel" id="try">
+  <h2>Things to try</h2>
+  <p class="sub">Use <a href="{{ url_for('index') }}#playground">Play with the sample</a> to change one setting at a time and re-run.</p>
+  <ul class="try">
+    <li><b>Capacity tolerance 1.05 → 1.60.</b> VEGA A0's over-capacity flag disappears. The sample's flag is real (two shipments are missing from the foundry file), so a loose tolerance would hide it.</li>
+    <li><b>E&amp;O bin baseline BIN1 → BIN3.</b> Final-test E&amp;O drops from 2,810 to 960 dies: only the aged stock is left.</li>
+    <li><b>As-of date 2027-06-01 and E&amp;O age 6 months.</b> Almost all final-test stock becomes E&amp;O. It shows how quickly today's WIP turns into ageing risk if it does not ship.</li>
+    <li><b>Edit the sample workbook.</b> Delete a row from Fab_Shipments, or change a product's gross die per wafer, upload it, and watch the capacity check respond.</li>
+    <li><b>Try your own data.</b> Paste a few weeks of your foundry and OSAT reports into the template. Vendor headings such as "Lot ID" or "Customer Product" are recognised.</li>
+  </ul>
+</section>
+
+<section class="panel">
+  <h2>Your data during the pilot</h2>
+  <p class="muted">Uploads are read in memory, processed and returned in the same response. Nothing is saved on the server, and the results file is generated for you only. If you test with real data, use data you are allowed to share, or anonymise lot numbers and part names first.</p>
+  {% if feedback_url %}<a class="btn" href="{{ feedback_url }}" target="_blank" rel="noopener">Tell us what you think</a>{% endif %}
+</section>
+</div>
+{% endblock %}

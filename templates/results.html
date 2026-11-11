@@ -1,0 +1,115 @@
+{% extends 'base.html' %}
+{% block title %}Plan Yukta · results{% endblock %}
+
+{% macro table(t, wrap_col=-1, empty='Nothing to show.') -%}
+  {% if t.rows %}
+  <div class="tablewrap"><table>
+    <thead><tr>{% for h in t.headers %}<th class="{{ 'num' if t.num[loop.index0] }}">{{ h }}</th>{% endfor %}</tr></thead>
+    <tbody>
+    {% for row in t.rows %}<tr>
+      {% for v in row %}
+        {% set cls = 'num' if t.num[loop.index0] else ('wrap' if loop.index0 == wrap_col else '') %}
+        <td class="{{ cls }}">
+          {%- if v.startswith('OVER') -%}<span class="tag bad">{{ v }}</span>
+          {%- elif v == 'OK' -%}<span class="tag ok">OK</span>
+          {%- elif v in ('UNMAPPED', 'UNRESOLVED') -%}<span class="tag bad">{{ v }}</span>
+          {%- elif cls == 'wrap' -%}<div>{{ v }}</div>
+          {%- else -%}{{ v }}{%- endif -%}
+        </td>
+      {% endfor %}
+    </tr>{% endfor %}
+    </tbody>
+  </table></div>
+  {% if t.more %}<p class="muted small">{{ t.more }} more rows in the results workbook.</p>{% endif %}
+  {% else %}<p class="muted small">{{ empty }}</p>{% endif %}
+{%- endmacro %}
+
+{% block body %}
+<div class="actions" style="justify-content:space-between; margin-bottom:6px">
+  <div>
+    <h1 style="margin:0">Plan results</h1>
+    <p class="muted small" style="margin:4px 0 0">
+      {{ source_name }} · as of {{ res.settings.as_of }} · latest OSAT snapshot {{ res.latest_snapshot.strftime('%Y-%m-%d %H:%M') }}
+      · {{ res.snapshot_count }} snapshot{{ 's' if res.snapshot_count != 1 }} used
+    </p>
+  </div>
+  <div class="actions">
+    <a class="btn" download="PlanYukta_Results.xlsx"
+       href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{{ xlsx_b64 }}">Download results (.xlsx)</a>
+    <a class="btn ghost" href="{{ url_for('index') }}">Run another</a>
+  </div>
+</div>
+{% if is_sample %}<div class="notice" style="margin-top:14px">This is the <b>synthetic sample</b>: invented products and lots, built so every check has something to find.</div>{% endif %}
+{% if res.unmapped_partnames %}
+<div class="error" style="margin-top:14px"><b>Some OSAT part names could not be assigned to a product:</b>
+  <span class="mono">{{ res.unmapped_partnames|join(', ') }}</span>. Add them to Name_Map, or check that their mother lots appear in the fab files.</div>
+{% endif %}
+
+<div class="kpis" style="margin-top:18px">
+  {% for label, value, hint in kpis %}
+  <div class="kpi"><div class="label">{{ label }}</div><div class="value">{{ value }}</div><div class="hint">{{ hint }}</div></div>
+  {% endfor %}
+</div>
+
+<section class="panel">
+  <h2>Where the material is</h2>
+  <p class="sub">Fab WIP excludes lots the foundry marks SHIPPED. OSAT quantities are from the latest snapshot after duplicate removal.</p>
+  {{ table(overview) }}
+  <details><summary>Fab WIP by stage</summary>{{ table(fab_stage) }}</details>
+</section>
+
+<div class="grid2">
+  <section class="panel">
+    <h2>Capacity check</h2>
+    <p class="sub">Active WIP in dies against wafers shipped × gross die per wafer × {{ res.settings.capacity_tolerance }}. Over capacity means something is double counted or a shipment is missing.</p>
+    {{ table(capacity) }}
+  </section>
+  <section class="panel">
+    <h2>Late fab lots</h2>
+    <p class="sub">Projected out date later than the committed date.</p>
+    {{ table(late, empty='No lot is projected past its committed date.') }}
+  </section>
+</div>
+
+<section class="panel">
+  <h2>Duplicate rows removed from the OSAT report</h2>
+  <p class="sub">{{ res.osat_rows_latest - res.osat_rows_kept }} of {{ res.osat_rows_latest }} rows in the latest snapshot removed. Every removal is listed with its rule.</p>
+  {{ table(dedup_effect) }}
+  <h3>Removed rows</h3>
+  {{ table(audit, wrap_col=1, empty='No duplicate rows found.') }}
+</section>
+
+<section class="panel">
+  <h2>Lot lead time</h2>
+  <p class="sub">Days per stage for each mother lot, from wafer start or fab ship to its latest OSAT snapshot.</p>
+  {% if bars %}
+  <div class="bars">
+    {% for b in bars %}
+    <div class="bar-row">
+      <div class="lot mono" title="{{ b.product }} · now in {{ b.stage }}">{{ b.lot }} <span class="muted">{{ b.product }}</span></div>
+      <div class="bar" style="width: {{ (b.total / bar_scale * 100)|round(1) }}%">
+        {% for st, d in b.segments %}<span class="s-{{ st.split(' ')[0] }}" style="flex: {{ d }}" title="{{ st }}: {{ d }} days"></span>{% endfor %}
+      </div>
+      <div class="mono small">{{ b.total }} d{{ '*' if b.scaled }}</div>
+    </div>
+    {% endfor %}
+  </div>
+  <div class="legend">{% for st in stage_names %}<span><i class="s-{{ st.split(' ')[0] }}"></i>{{ st }}</span>{% endfor %}<span>* scaled to elapsed time</span></div>
+  {% endif %}
+  <details><summary>Lead time table</summary>{{ table(lead) }}</details>
+</section>
+
+<div class="grid2">
+  <section class="panel">
+    <h2>Excess &amp; obsolete</h2>
+    <p class="sub">Date code older than {{ res.settings.eo_age_months|int }} months, or bin above {{ res.settings.bin_baseline }}.</p>
+    {{ table(eo_summary) }}
+    <details><summary>E&amp;O rows</summary>{{ table(eo_rows, wrap_col=eo_rows.headers|length - 1, empty='No E&O rows.') }}</details>
+  </section>
+  <section class="panel">
+    <h2>Final-test binning</h2>
+    <p class="sub">Testing and Packing dies by bin. Unknown means the OSAT left the bin blank.</p>
+    {{ table(binning) }}
+  </section>
+</div>
+{% endblock %}
