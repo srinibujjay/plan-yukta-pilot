@@ -1,12 +1,13 @@
 # Render Blueprint for the Plan Yukta pilot.
-# Put this folder's contents at the root of its own GitHub repo, then in Render:
-# New > Blueprint > pick the repo. Cost: one 0.5 CPU / 512 MB instance (US$7/month)
-# on the free Hobby workspace plan.
+# New > Blueprint > pick this repo. Starts on Render's free instance (no charge):
+# it sleeps after 15 minutes without visitors and takes about a minute to wake.
+# For an always-on pilot change 'plan: free' to 'plan: 0.5c-512mb' (US$7/month),
+# or upgrade the instance type in the Render dashboard.
 services:
   - type: web
     name: plan-yukta-pilot
     runtime: python
-    plan: 0.5c-512mb
+    plan: free
     buildCommand: pip install -r requirements.txt
     startCommand: gunicorn app:app --workers 1 --threads 4 --timeout 120 --bind 0.0.0.0:$PORT
     healthCheckPath: /healthz
