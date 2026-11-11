@@ -23,6 +23,16 @@
   <section class="panel">
     <h2>2 · Run the plan</h2>
     <p class="sub">Upload your filled workbook (.xlsx, up to 25&nbsp;MB).</p>
+    <div class="notice small" style="margin-bottom:12px">
+      <b>What to upload:</b> the Plan Yukta template with your data in it.
+      Six sheets for the WIP view: Settings, Products, Name_Map, Fab_WIP, Fab_Shipments and OSAT_WIP.
+      Add Demand, Plan_Params, Tester_Params and Tester_Capacity to switch on forecasting, the supply plan, tester capacity and the B2B package.
+      <div class="actions" style="margin-top:8px">
+        <a class="btn ghost" href="{{ url_for('download', name='template') }}">Blank template</a>
+        <a class="btn ghost" href="{{ url_for('download', name='sample') }}">Filled sample</a>
+        <a href="{{ url_for('upload_format') }}">Column-by-column format →</a>
+      </div>
+    </div>
     <form method="post" action="{{ url_for('run') }}" enctype="multipart/form-data">
       <div class="drop"><input type="file" name="workbook" accept=".xlsx,.xlsm" required></div>
       <div class="actions"><button class="btn" type="submit">Run plan</button></div>

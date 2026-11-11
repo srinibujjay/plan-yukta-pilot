@@ -148,3 +148,31 @@ td.util.tight, i.u-tight { background: color-mix(in srgb, var(--accent) 22%, var
 td.util.over, i.u-over { background: color-mix(in srgb, var(--warn) 28%, var(--panel)); font-weight: 600; }
 .play fieldset { border: none; padding: 0; margin: 0; display: contents; }
 .play h4 { grid-column: 1 / -1; margin: 6px 0 0; font-size: 13px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+
+#py-chat { position: fixed; right: 18px; bottom: 18px; z-index: 50; }
+#py-chat .chat-open { box-shadow: 0 6px 18px rgba(0,0,0,.18); border-radius: 999px; }
+#py-chat .chat-panel { position: absolute; right: 0; bottom: 52px; width: min(380px, calc(100vw - 36px)); height: min(520px, calc(100vh - 110px));
+  background: var(--panel); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 12px 32px rgba(0,0,0,.18);
+  display: flex; flex-direction: column; overflow: hidden; }
+#py-chat .chat-panel[hidden] { display: none; }
+#py-chat .chat-head { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+#py-chat .chat-head b { flex: 1; }
+#py-chat .chat-close { border: none; background: none; font-size: 22px; line-height: 1; cursor: pointer; color: var(--muted); }
+#py-chat .chat-log { flex: 1; overflow-y: auto; padding: 12px; display: grid; gap: 8px; align-content: start; font-size: 14px; }
+#py-chat .msg { padding: 8px 10px; border-radius: 10px; max-width: 92%; overflow-wrap: anywhere; }
+#py-chat .msg.bot { background: var(--chip); justify-self: start; }
+#py-chat .msg.user { background: var(--brand); color: var(--panel); justify-self: end; }
+#py-chat .msg ul { margin: 4px 0; padding-left: 18px; }
+#py-chat .mode { font-size: 11px; color: var(--muted); margin-top: 4px; }
+#py-chat .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+#py-chat .chip { border: 1px solid var(--line); background: var(--panel); color: var(--ink); border-radius: 999px; padding: 4px 10px; font: inherit; font-size: 12px; cursor: pointer; }
+#py-chat form { display: flex; gap: 8px; padding: 10px; border-top: 1px solid var(--line); }
+#py-chat textarea { flex: 1; resize: none; font: inherit; font-size: 14px; color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; }
+@media print { #py-chat { display: none; } }
+
+.chain { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 12px 0 6px; }
+.chain .node { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; background: var(--chip); min-width: 120px; flex: 1 1 120px; }
+.chain .node b { display: block; font-size: 13px; }
+.chain .node span { font-size: 12px; color: var(--muted); }
+.chain i { font-style: normal; color: var(--muted); }
+table.worked td { white-space: normal; vertical-align: top; }

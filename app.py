@@ -21,12 +21,16 @@ from pathlib import Path
 
 import markdown
 import pandas as pd
-from flask import (Flask, abort, redirect, render_template, request, send_from_directory,
+import json
+import time
+
+from flask import (Flask, abort, jsonify, redirect, render_template, request, send_from_directory,
                    session, url_for)
 
 from plan_yukta.engine import OSAT_OPERATIONS, STAGE_SEQUENCE, TemplateError, read_workbook, run_plan
+from plan_yukta import assistant, format_spec
 from plan_yukta.planning import (STAGE_LABEL, PlanningInputError, b2b_workbook, run_planning,
-                                 settings_from_values)
+                                 settings_from_values, product_params, worked_example)
 
 HERE = Path(__file__).parent
 STATIC = HERE / 'static'
@@ -60,6 +64,8 @@ def _require_access():
         return None
     if session.get('tester') not in _testers():   # removed testers lose access on next request
         session.clear()
+        if request.path.startswith('/api/'):
+            return jsonify({'error': 'Your session has ended. Please sign in again.'}), 401
         return redirect(url_for('login', next=request.path))
     return None
 
@@ -91,7 +97,25 @@ def logout():
 
 @app.context_processor
 def _globals():
-    return {'feedback_url': FEEDBACK_URL, 'tester': session.get('tester'), 'access_on': bool(_testers())}
+    return {'feedback_url': FEEDBACK_URL, 'tester': session.get('tester'), 'access_on': bool(_testers()),
+            'chat_ai': assistant.ai_enabled()}
+
+
+CHAT_LIMIT = int(os.environ.get('CHAT_LIMIT_PER_HOUR', '30'))
+
+
+@app.post('/api/chat')
+def chat():
+    payload = request.get_json(silent=True) or {}
+    now = time.time()
+    recent = [t for t in session.get('chat_times', []) if now - t < 3600]
+    if len(recent) >= CHAT_LIMIT:
+        return jsonify({'answer': f'You have reached {CHAT_LIMIT} questions this hour. Please try again later.',
+                        'mode': 'limit'})
+    session['chat_times'] = recent + [now]
+    result = assistant.ask(payload.get('question', ''), payload.get('context', ''), payload.get('history') or [])
+    app.logger.info('PILOT chat tester=%s mode=%s', session.get('tester', '-'), result['mode'])
+    return jsonify(result)
 
 
 def _fmt(v):
@@ -292,6 +316,29 @@ def planning_view(pr: dict):
     }
 
 
+def chat_context(res: dict) -> str:
+    """Compact summary of the current results for the chat assistant."""
+    out = {'as_of': str(res['settings'].as_of),
+           'material_now_by_product': res['overview'].to_dict('records'),
+           'duplicate_rows_removed': int(res['osat_rows_latest'] - res['osat_rows_kept']),
+           'capacity_check': res['capacity'][['MASTER_PRODUCT', 'status']].to_dict('records'),
+           'late_fab_lots': len(res['late_lots']), 'unmapped_osat_names': res['unmapped_partnames']}
+    pr = res.get('planning')
+    if pr:
+        te = pr['testers'].copy(); te['MONTH'] = te['MONTH'].dt.strftime('%Y-%m')
+        out.update({
+            'plan_settings': {'start': str(pr['settings'].plan_start), 'horizon_months': pr['settings'].horizon_months,
+                              'method': pr['settings'].forecast_method, 'uplift_pct': pr['settings'].demand_uplift_pct,
+                              'overrides': pr['settings'].overrides},
+            'plan_summary': pr['summary'].to_dict('records'),
+            'forecast_accuracy': pr['accuracy'].to_dict('records'),
+            'alerts': pr['alerts'].head(15).to_dict('records'),
+            'tester_utilisation_pct': te.pivot_table(index='TESTER_TYPE', columns='MONTH',
+                                                     values='utilisation_pct').round(0).to_dict('index'),
+        })
+    return json.dumps(out, default=str)[:6000]
+
+
 def render_results(res: dict, source_name: str, is_sample: bool):
     ov = res['overview']
     ops = [k for k, _, _ in OSAT_OPERATIONS]
@@ -343,6 +390,7 @@ def render_results(res: dict, source_name: str, is_sample: bool):
         bars=bars, bar_scale=scale, stage_names=['Fab'] + STAGE_SEQUENCE,
         fab_stage=_table(res['fab_by_stage'], {'MASTER_PRODUCT': 'Product', 'Current Stage': 'Stage', 'wafers': 'Wafers'}),
         xlsx_b64=xlsx, plan=planning_view(res.get('planning')), planning_error=res.get('planning_error'),
+        chat_context=chat_context(res),
     )
 
 
@@ -390,9 +438,26 @@ def index():
     return render_template('index.html')
 
 
+@app.get('/format')
+def upload_format():
+    return render_template('format.html', sheets=format_spec.SHEETS, rules=format_spec.RULES)
+
+
+_EXAMPLE = {}
+
+
+def guide_example():
+    """Worked backward-planning example built from the sample workbook's own parameters."""
+    if not _EXAMPLE:
+        d = read_workbook(SAMPLE)['planning']
+        params = product_params(d['plan_params'], {})
+        _EXAMPLE['ex'] = worked_example(params, d['tester_params'], 'ORION B0', 400_000, '2027-06-01')
+    return _EXAMPLE['ex']
+
+
 @app.get('/guide')
 def guide():
-    return render_template('guide.html')
+    return render_template('guide.html', ex=guide_example())
 
 
 @app.get('/method')

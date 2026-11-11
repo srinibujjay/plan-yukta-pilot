@@ -547,3 +547,41 @@ def settings_from_values(values: dict, default_start) -> PlanSettings:
         alpha=num('Smoothing alpha', 0.35, 0.05, 0.95),
         beta=num('Smoothing beta', 0.15, 0.01, 0.9),
     )
+
+
+def worked_example(params: dict, tester_params: pd.DataFrame, product: str, units: float, month) -> dict:
+    """Trace one finished-goods requirement backwards through the modules, with every intermediate number."""
+    p = params[product]
+    m = month_start(month)
+    ft_m = m - pd.DateOffset(months=wk_to_m(p['CT_FT_WK']))
+    assy_m = m - pd.DateOffset(months=int(p['lt_back_m']))
+    dies = units / (p['ASSY_YIELD'] * p['FT_YIELD'])
+    ft_in = dies * p['ASSY_YIELD']
+    wafers = dies / p['good_die_per_wafer']
+    lots = math.ceil(wafers / p['WAFER_LOT'])
+    wafers_r = lots * p['WAFER_LOT']
+    wafer_m = assy_m - pd.DateOffset(months=int(p['lt_front_m']))
+    sort_m = wafer_m + pd.DateOffset(months=wk_to_m(p['CT_FAB_WK'] + p['CT_BUMP_WK']))
+    sort_wafers = wafers_r * p['FAB_LINE_YIELD']
+    tp = tester_params.copy()
+    tp.columns = [str(c).strip().upper() for c in tp.columns]
+    tp = tp[tp['PRODUCT'].astype(str).str.strip() == product]
+    ft_s, sort_s, ft_names, sort_names = 0.0, 0.0, [], []
+    for _, r in tp.iterrows():
+        ins = str(r['INSERTION']).upper()
+        tt, idx, sites = float(r['TEST_TIME_S']), float(r.get('INDEX_TIME_S', 0) or 0), max(1.0, float(r['SITES']))
+        if ins.startswith(('CP', 'WS')):
+            step = _pct(r.get('STEPPING_EFF', 1) or 1)
+            sort_s += math.ceil(p['GDW'] / sites) / step * (tt + idx) + float(r.get('WAFER_LOAD_S', 0) or 0)
+            sort_names.append(ins)
+        else:
+            ft_s += (tt + idx) / sites
+            ft_names.append(ins)
+    return {
+        'product': product, 'units': units, 'month': m, 'p': p,
+        'ft_month': ft_m, 'assy_month': assy_m, 'wafer_month': wafer_m, 'sort_month': sort_m,
+        'dies': dies, 'ft_in': ft_in, 'wafers': wafers, 'lots': lots, 'wafers_rounded': wafers_r,
+        'surplus_die': wafers_r * p['good_die_per_wafer'] - dies, 'sort_wafers': sort_wafers,
+        'ft_seconds': ft_s, 'ft_hours': ft_in * ft_s / 3600, 'ft_insertions': ', '.join(ft_names),
+        'sort_seconds': sort_s, 'sort_hours': sort_wafers * sort_s / 3600, 'sort_insertions': ', '.join(sort_names),
+    }

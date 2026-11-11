@@ -4,7 +4,7 @@
   <h2>1 · Demand forecast</h2>
   <p class="sub">Method: <b>{{ plan.settings.forecast_method|title }}</b>{% if plan.settings.demand_uplift_pct %} · scenario uplift <b>{{ '%+g'|format(plan.settings.demand_uplift_pct) }}%</b>{% endif %}
     · {{ plan.settings.horizon_months }} months from {{ plan.settings.plan_start.strftime('%b %Y') }}.
-    Statistical forecast = Holt exponential smoothing (level {{ plan.settings.alpha }}, trend {{ plan.settings.beta }}).</p>
+    Statistical forecast = Holt's method, exponential smoothing of level and trend (alpha {{ plan.settings.alpha }}, beta {{ plan.settings.beta }}).</p>
   <div class="fc-grid">
   {% for p in plan.plans %}
     <div class="fc-card">

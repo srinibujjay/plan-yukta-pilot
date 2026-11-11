@@ -11,10 +11,11 @@
 <body>
 <header class="top">
   <div class="wrap">
-    <a class="brand" href="{{ url_for('index') }}"><b>Plan Yukta</b><span>fabless supply-chain visibility · pilot</span></a>
+    <a class="brand" href="{{ url_for('index') }}"><b>Plan Yukta</b><span>fabless supply-chain planning · pilot</span></a>
     <nav>
       <a href="{{ url_for('guide') }}">What it does</a>
       <a href="{{ url_for('index') }}">Run a plan</a>
+      <a href="{{ url_for('upload_format') }}">Upload format</a>
       <a href="{{ url_for('method') }}">How it calculates</a>
       {% if feedback_url %}<a href="{{ feedback_url }}" target="_blank" rel="noopener">Give feedback</a>{% endif %}
       {% if access_on and tester %}<a href="{{ url_for('logout') }}" title="Signed in as {{ tester }}">Sign out</a>{% endif %}
@@ -22,6 +23,22 @@
   </div>
 </header>
 <main><div class="wrap">{% block body %}{% endblock %}</div></main>
+{% if not access_on or tester %}
+<div id="py-chat" data-url="{{ url_for('chat') }}">
+  <button class="chat-open btn" type="button" aria-label="Ask Plan Yukta">Ask Plan Yukta</button>
+  <div class="chat-panel" hidden>
+    <div class="chat-head"><b>Ask Plan Yukta</b><span class="muted small">{{ 'AI assistant' if chat_ai else 'Help search' }}</span>
+      <button class="chat-close" type="button" aria-label="Close">×</button></div>
+    <div class="chat-log">
+      <div class="msg bot">Ask about what to upload, how the plan works, or what your results mean.{% if chat_context %} I can see a summary of the results on this page.{% endif %}</div>
+      <div class="chips"><button class="chip" type="button">What do I upload?</button><button class="chip" type="button">How does the plan work backwards?</button><button class="chip" type="button">How is tester capacity calculated?</button><button class="chip" type="button">What is Holt's method?</button></div>
+    </div>
+    <form><textarea rows="2" placeholder="Type a question…" maxlength="800"></textarea><button class="btn" type="submit">Send</button></form>
+  </div>
+</div>
+{% if chat_context %}<script type="application/json" id="py-context">{{ chat_context|safe }}</script>{% endif %}
+<script src="{{ url_for('static', filename='chat.js') }}" defer></script>
+{% endif %}
 <footer><div class="wrap">Pilot build for invited testers{% if tester %} · signed in as {{ tester }}{% endif %}. Uploads are processed in memory and not stored. Sample data is synthetic.</div></footer>
 </body>
 </html>

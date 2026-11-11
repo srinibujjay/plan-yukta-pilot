@@ -23,3 +23,9 @@ services:
         sync: false
       - key: FEEDBACK_URL      # optional: link to a feedback form, shown in the header
         sync: false
+      - key: ANTHROPIC_API_KEY # optional: turns the chat into an AI assistant; without it the chat searches the help
+        sync: false
+      - key: CHAT_MODEL        # model used when ANTHROPIC_API_KEY is set
+        value: claude-haiku-5-5
+      - key: CHAT_LIMIT_PER_HOUR
+        value: "30"

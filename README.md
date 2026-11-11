@@ -56,6 +56,14 @@ PILOT_ACCESS=ravi:K7q2Lm9p,anita:P9xwT3rb,john:Q4ne8Vz2
 - Render's **Logs** tab shows who signed in and ran plans (`PILOT login tester=...`, `PILOT run tester=...`). No uploaded data is logged.
 - Leave `PILOT_ACCESS` empty only when running locally.
 
+### Chat assistant
+
+Every page has an **Ask Plan Yukta** button.
+
+- **Without an API key**, it answers by searching the built-in help: the guide, the formulas and the upload format.
+- **With an AI key**, it becomes an AI assistant that also explains the results on the tester's screen. Create a key at console.anthropic.com and set it as `ANTHROPIC_API_KEY` in Render's Environment tab.
+- The key is billed per question. Each tester is limited to `CHAT_LIMIT_PER_HOUR` questions an hour (30 by default).
+
 ### Sizing
 
 Tested with a 13.5 MB workbook holding about 57,000 OSAT rows (468 daily snapshots). It used about 160 MB of memory and took about 25 seconds on one full CPU. The 0.5 CPU instance will be slower, so the gunicorn timeout is 120 s.

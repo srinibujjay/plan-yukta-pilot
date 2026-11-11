@@ -1,0 +1,26 @@
+{% extends 'base.html' %}
+{% block title %}Upload format · Plan Yukta{% endblock %}
+{% block body %}
+<h1>What to upload</h1>
+<p class="lead">One Excel workbook made from the Plan Yukta template. Fill the sheets below with your own data, save, and upload it on <a href="{{ url_for('index') }}">Run a plan</a>.</p>
+<div class="actions" style="margin-bottom:18px">
+  <a class="btn" href="{{ url_for('download', name='template') }}">Download blank template</a>
+  <a class="btn ghost" href="{{ url_for('download', name='sample') }}">Download filled sample</a>
+</div>
+<section class="panel">
+  <h2>Rules</h2>
+  <ul>{% for r in rules %}<li>{{ r }}</li>{% endfor %}</ul>
+</section>
+<nav class="subnav">{% for s in sheets %}<a href="#{{ s.sheet }}">{{ s.sheet }}</a>{% endfor %}</nav>
+{% for s in sheets %}
+<section class="panel" id="{{ s.sheet }}">
+  <h2>{{ s.sheet }} <span class="tag {{ 'ok' if s.required else '' }}">{{ 'Required' if s.required else 'For planning' }}</span>
+    <span class="muted small">· {{ s.module }}</span></h2>
+  <p class="sub">{{ s.purpose }}</p>
+  <div class="tablewrap"><table>
+    <thead><tr><th>Column</th><th>Required</th><th>Type</th><th>Example</th><th>Notes</th></tr></thead>
+    <tbody>{% for c in s.columns %}<tr><td class="mono">{{ c[0] }}</td><td>{{ c[1] }}</td><td>{{ c[2] }}</td><td class="mono">{{ c[3] }}</td><td class="wrap"><div>{{ c[4] }}</div></td></tr>{% endfor %}</tbody>
+  </table></div>
+</section>
+{% endfor %}
+{% endblock %}
