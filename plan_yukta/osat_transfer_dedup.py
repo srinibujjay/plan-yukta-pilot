@@ -1,5 +1,3 @@
-# Copied unchanged from dashboard/osat_transfer_dedup.py so the pilot deploys on its own.
-# Keep the two in sync if the de-duplication rules change.
 """
 OSAT WIP de-duplication when the same physical wafer appears in multiple MAIN stages.
 

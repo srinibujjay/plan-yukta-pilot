@@ -1,0 +1,20 @@
+{% extends 'base.html' %}
+{% from '_macros.html' import head with context %}
+{% block body %}
+{{ head(page) }}
+{% set items = R.checks['items'] %}
+<div class="kpis">
+  <div class="kpi {{ 'bad' if items|selectattr('severity', 'equalto', 'error')|list else 'ok' }}"><div class="label">Errors</div><div class="value">{{ items|selectattr('severity', 'equalto', 'error')|list|length }}</div><div class="sub">change or stop the plan</div></div>
+  <div class="kpi {{ 'warn' if items|selectattr('severity', 'equalto', 'warning')|list else 'ok' }}"><div class="label">Warnings</div><div class="value">{{ items|selectattr('severity', 'equalto', 'warning')|list|length }}</div><div class="sub">worth fixing</div></div>
+  <div class="kpi info"><div class="label">Notes</div><div class="value">{{ items|selectattr('severity', 'equalto', 'info')|list|length }}</div><div class="sub">for information</div></div>
+</div>
+<section class="panel">
+  <h2>What to fix</h2>
+  {% if items %}
+  <div class="tablewrap"><table><thead><tr><th>Level</th><th>Table</th><th>Problem</th><th></th></tr></thead>
+  <tbody>{% for c in items %}<tr><td><span class="badge {{ 'bad' if c.severity == 'error' else 'warn' if c.severity == 'warning' else 'info' }}">{{ c.severity }}</span></td>
+    <td>{{ tables_meta[c.table].title if c.table in tables_meta else c.table }}</td><td class="wrap">{{ c.message }}</td>
+    <td>{% if c.table in tables_meta %}<a class="btn ghost sm" href="/data/{{ c.table }}">Open table</a>{% endif %}</td></tr>{% endfor %}</tbody></table></div>
+  {% else %}<p class="muted">No problems found in the data.</p>{% endif %}
+</section>
+{% endblock %}

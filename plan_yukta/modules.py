@@ -1,0 +1,323 @@
+"""
+Module catalogue: sidebar, page headers, the "About this module" panels, the demo
+tour and the chat assistant's knowledge all come from here, so they never disagree.
+"""
+
+ICONS = {
+    'home': 'M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z',
+    'demand': 'M3 17l5-5 4 4 8-8M15 8h5v5',
+    'test': 'M7 7h10v10H7zM4 9h3M4 15h3M17 9h3M17 15h3M9 4v3M15 4v3M9 17v3M15 17v3',
+    'pullin': 'M12 3v12M7 10l5 5 5-5M5 21h14',
+    'assembly': 'M12 3l9 5-9 5-9-5zM3 13l9 5 9-5',
+    'wafer': 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM8 9h2M12 9h2M8 13h2M12 13h2M16 13h0M10 17h4',
+    'flow': 'M4 7h11l-3-3M20 17H9l3 3M4 7v0M20 17v0',
+    'atp': 'M5 12l4 4 10-10',
+    'gauge': 'M4 15a8 8 0 1 1 16 0M12 15l4-5',
+    'tool': 'M14 6a4 4 0 0 0-5 5l-6 6 3 3 6-6a4 4 0 0 0 5-5l-3 3-3-3z',
+    'econ': 'M12 3v18M16 7.5c0-1.5-1.8-2.5-4-2.5s-4 1-4 3 1.8 2.6 4 3 4 1 4 3-1.8 3-4 3-4-1-4-2.5',
+    'npi': 'M5 19l4-1 10-10-3-3L6 15zM14 6l3 3',
+    'fab': 'M3 21V9l6 4V9l6 4V5l6 4v12z',
+    'osat': 'M3 7h18v12H3zM8 7V5h8v2M3 12h18',
+    'layers': 'M12 3l9 4-9 4-9-4zM3 12l9 4 9-4M3 17l9 4 9-4',
+    'cross': 'M4 7h13l-3-3M17 4l3 3-3 3M20 17H7l3-3M7 20l-3-3 3-3',
+    'calendar': 'M4 6h16v14H4zM4 10h16M8 3v4M16 3v4',
+    'pva': 'M4 20V10M10 20V4M16 20v-6M22 20H2',
+    'camera': 'M4 8h4l2-3h4l2 3h4v11H4zM12 11a3 3 0 1 0 0 6 3 3 0 0 0 0-6z',
+    'cost': 'M4 6h16v12H4zM4 10h16M8 15h3',
+    'pnl': 'M3 3v18h18M7 15l4-4 3 3 6-7',
+    'box': 'M3 7l9-4 9 4v10l-9 4-9-4zM3 7l9 4 9-4M12 11v10',
+    'search': 'M10 4a6 6 0 1 0 0 12 6 6 0 0 0 0-12zM15 15l5 5',
+    'table': 'M3 5h18v14H3zM3 10h18M3 15h18M9 5v14',
+    'wand': 'M4 20l10-10M14 4l1 2 2 1-2 1-1 2-1-2-2-1 2-1zM19 11l.5 1 1 .5-1 .5-.5 1-.5-1-1-.5 1-.5z',
+    'alert': 'M12 4l9 16H3zM12 10v4M12 17v.5',
+    'io': 'M12 3v12M7 8l5-5 5 5M5 21h14',
+    'gear': 'M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6zM19 12l2-1-1-3-2 .3-1.5-1.5L17 4l-3-1-1 2h-2l-1-2-3 1 .5 2.8L6 8.3 4 8l-1 3 2 1v0l-2 1 1 3 2-.3 1.5 1.5L7 20l3 1 1-2h2l1 2 3-1-.5-2.8 1.5-1.5 2 .3 1-3z',
+    'help': 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM9.5 9a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6V14M12 17v.5',
+    'tour': 'M5 3v18M5 4h11l-2 4 2 4H5',
+}
+
+# key, group, short label, icon, title
+NAV = [
+    ('home', None, 'Cockpit', 'home'),
+    ('demand', 'Planning modules', 'Demand & Forecast', 'demand'),
+    ('testing', 'Planning modules', 'M1 · Testing Starts', 'test'),
+    ('pullin', 'Planning modules', 'Pull-in & Service Level', 'pullin'),
+    ('assembly', 'Planning modules', 'M2 · Assembly Starts', 'assembly'),
+    ('frontend', 'Planning modules', 'M3 · Front End & Wafers', 'wafer'),
+    ('flow', 'Planning modules', 'M4 · Complete Flow', 'flow'),
+    ('atp', 'Planning modules', 'M5 · Available to Promise', 'atp'),
+    ('testers', 'Capacity & engineering', 'Tester Capacity', 'gauge'),
+    ('hardware', 'Capacity & engineering', 'Hardware Readiness', 'tool'),
+    ('ate', 'Capacity & engineering', 'ATE Economics', 'econ'),
+    ('npi', 'Capacity & engineering', 'NPI Management', 'npi'),
+    ('fab-po', 'Procurement & B2B', 'FAB PO Schedule', 'fab'),
+    ('osat-po', 'Procurement & B2B', 'OSAT PO Schedule', 'osat'),
+    ('substrate', 'Procurement & B2B', 'Substrate & Lead Frame', 'layers'),
+    ('cross-flow', 'Procurement & B2B', 'Cross Flow', 'cross'),
+    ('b2b', 'Procurement & B2B', 'Monthly B2B Package', 'calendar'),
+    ('pva', 'Analytics & monitoring', 'Plan vs Actual', 'pva'),
+    ('snapshots', 'Analytics & monitoring', 'Snapshot Comparison', 'camera'),
+    ('cost', 'Analytics & monitoring', 'Cost Planning', 'cost'),
+    ('pnl', 'Analytics & monitoring', 'Profit & Loss', 'pnl'),
+    ('osat-wip', 'Analytics & monitoring', 'OSAT WIP Snapshot', 'box'),
+    ('audit', 'Analytics & monitoring', 'Lot-level WIP Audit', 'search'),
+    ('data', 'Data & setup', 'Data Tables', 'table'),
+    ('sku-setup', 'Data & setup', 'SKU Setup Wizard', 'wand'),
+    ('checks', 'Data & setup', 'Data Checks', 'alert'),
+    ('io', 'Data & setup', 'Import / Export', 'io'),
+    ('tour', 'Help', 'Demo Tour', 'tour'),
+    ('method', 'Help', 'How It Calculates', 'help'),
+]
+
+GROUP_ORDER = ['Planning modules', 'Capacity & engineering', 'Procurement & B2B', 'Analytics & monitoring', 'Data & setup', 'Help']
+
+INFO = {
+    'home': dict(
+        title='Supply chain cockpit',
+        summary='The whole plan on one page: demand, tester crunch points, customer shortfalls, purchase orders due and data problems.',
+        what='Every number on this page comes from the plan Plan Yukta just ran on your workspace data. Change any data table and the cockpit, and every module, recalculates.',
+        tables=['forecast', 'orders', 'tester_fleet', 'osat_wip']),
+    'demand': dict(
+        title='Demand & Forecast',
+        summary='Customer forecast, booked orders and a statistical forecast, combined per product into the demand the plan builds to.',
+        what='Each product has a build strategy. FORECAST builds to the larger of customer forecast and booked orders (forecast consumption). ORDERS builds to booked orders only, typical for end-of-life parts. STAT uses the statistical forecast; BLEND averages customer and statistical forecast. Booked orders always set a floor.',
+        how=["Statistical forecast: Holt's linear trend exponential smoothing on monthly shipment history. level = α·actual + (1−α)·(level + trend); trend = β·(level change) + (1−β)·trend; forecast(h) = level + h·trend.",
+             'Accuracy over the last 6 months of history: WMAPE = Σ|actual − forecast| ÷ Σ actual; Bias = Σ(forecast − actual) ÷ Σ actual (positive = forecast runs high).',
+             'Order coverage = booked orders ÷ plan demand, per month.',
+             'Demand uplift % (Plan settings) scales all plan demand for what-if scenarios.'],
+        tables=['forecast', 'orders', 'shipment_history', 'products', 'settings'],
+        tryit=['Change ATLAS build strategy from ORDERS to FORECAST in Products and see its demand rise.',
+               'Set Demand uplift % to 15 in Plan settings, then open Testing Starts to see the tester crunch grow.']),
+    'testing': dict(
+        title='Module 1 · Testing Starts',
+        summary='How many units each OSAT must start in final test each month, and whether its testers can do it.',
+        what='Starting from the demand plan, Plan Yukta splits each product across its qualified OSATs, nets finished goods and WIP already in the line, and works out the test starts needed. It then checks those starts against the tester fleet at each OSAT. Where testers fall short it builds ahead in earlier months with idle time (pull-in), and makes what is still short in the following months (catch-up).',
+        how=['Vendor split: each product goes to the OSATs that have test times for all its test steps, in proportion to their share.',
+             'Finished goods needed = demand + safety-stock build (safety stock weeks × next month demand ÷ 4.33) − finished goods on hand.',
+             'Test starts = good units needed out of the step ÷ test yield. Tester load = starts × (1 + retest rate) + WIP already waiting at the tester.',
+             'Units one tester can test in a month = hours per day × 3600 × OEE × working days ÷ ((test time + index time) ÷ sites).',
+             'Allocation per OSAT and step, highest product priority first: consignee (your own) testers first, then non-consignee (the OSAT\'s) testers if allowed.',
+             'Pull-in: idle tester time up to the pull-in horizon earlier covers a later shortfall, but only as far back as material can be built, and capped at min(service level, max pull-in %) of the shortfall.',
+             'Catch-up: what is still short is tested in the next months with idle time; finished goods then ship late.'],
+        tables=['tester_fleet', 'tester_capacity', 'process_flow', 'yield_overrides', 'fleet_changes', 'osat_wip', 'vendors'],
+        tryit=['In Tester fleet, cut OSAT-A Test1 consignee testers from 6 to 4 and save: watch shortfalls, pull-in and customer shortages appear.',
+               'Set "Allow non-consignee testers" to N in Plan settings to plan on your own testers only.',
+               'Raise ORION Test1 yield to 0.95 in Process flow and see the test load drop.']),
+    'pullin': dict(
+        title='Pull-in & Service Level',
+        summary='How much inventory you are willing to build ahead when testers are short later, product by product.',
+        what='Pull-in trades cash for delivery: testing early when testers are idle avoids a later shortfall but holds inventory longer. Each product has a switch (PullIn), a service level (how much of a future shortfall to cover) and a max pull-in % (a cash cap). The smaller of the two applies. The pull-in horizon in Plan settings limits how far ahead you build, which limits obsolescence risk.',
+        how=['Pull-in units for a shortfall month = min(service level, max pull-in %) × shortfall, filled from the latest earlier month first.',
+             'Pull-in never goes earlier than the material lead time: a start must still be buildable from new wafers.',
+             'Holding cost is not charged in the pilot; pulled-in units show in Testing Starts as "Pull-in" and in Complete Flow as extra finished goods.'],
+        tables=['products', 'settings'],
+        tryit=['Set VEGA PullIn to N and save: its spring shortfall is then made late (catch-up) instead of early.',
+               'Raise VEGA MaxPullInPct to 100 to cover the whole shortfall early.']),
+    'assembly': dict(
+        title='Module 2 · Assembly Starts',
+        summary='Die that must enter assembly each month to feed the test starts, and the sorted wafers that supply them.',
+        what='Assembly feeds final test. Plan Yukta takes the test starts the testers can actually do (including pull-in and catch-up), nets assembled units already at the OSAT, divides by assembly yield, and converts die into sorted wafers using good die per wafer.',
+        how=['Die into assembly = (test starts − assembled units in stock or WIP) ÷ assembly yield.',
+             'Good die per wafer = gross die per wafer × sort yield × bump yield. Sort and bump yields are die-level: the wafer count does not change, the good die per wafer does.',
+             'Wafers needed for assembly = die ÷ good die per wafer, netted against die bank wafers first.'],
+        tables=['process_flow', 'products', 'osat_wip', 'yield_overrides'],
+        tryit=['Change LYRA assembly yield from 0.97 to 0.90 and compare die and wafer needs.']),
+    'frontend': dict(
+        title='Module 3 · Front End & Wafer Plan',
+        summary='Bump and wafer-sort starts at each OSAT, prober capacity, and the wafers the fab must deliver and start.',
+        what='Working back from assembly, Plan Yukta plans bump and wafer sort at each OSAT, checks sort against the prober fleet, then sums the wafers every OSAT needs per product and nets fab WIP by its expected out date. What is left becomes fab wafer starts, offset by the fab cycle time and rounded up to whole lots.',
+        how=['Bump and sort starts = wafers needed downstream − WIP at that step (die-level yields, so wafers in = wafers out).',
+             'Sort seconds per wafer = ⌈GDPW ÷ sites⌉ ÷ stepping efficiency × (test time + index) + wafer load time.',
+             'Fab outs needed = sort starts at every OSAT, moved earlier by the transit time; fab WIP covers them first (late if it arrives after the need).',
+             'Wafer starts = remaining wafers, moved earlier by the fab cycle time, rounded up to the wafer lot size; rounding extra carries forward.',
+             'A need that falls before new starts could finish is "inside lead time": it is flagged for expedite.'],
+        tables=['fab_wip', 'tester_capacity', 'tester_fleet', 'settings', 'products'],
+        tryit=['Change Fab cycle time weeks from 12 to 16 and see more needs fall inside lead time.',
+               'Change Wafer lot size to 12 to see less rounding excess.']),
+    'flow': dict(
+        title='Module 4 · Complete Flow',
+        summary='Every product at every OSAT, month by month, from wafer starts to customer shipments.',
+        what='This is the joined-up plan: demand, finished goods, pack, test, assembly, bump, sort and fab, with the shortfalls that reach customers. A shortfall anywhere (testers, inside lead time) is converted to finished units through the remaining yields and shown as a customer shortage only when safety stock and finished goods cannot absorb it.',
+        how=['Shipments = min(demand + backlog, finished goods available). Backlog is demand already late.',
+             'Finished goods end of month = on hand + pack output − shipments.',
+             'Each step is offset by the cumulative cycle time from that step to shipment, in whole months.'],
+        tables=['process_flow', 'forecast', 'osat_wip', 'tester_fleet'],
+        tryit=['Filter to one product and vendor to follow a single supply chain end to end.']),
+    'atp': dict(
+        title='Module 5 · Available to Promise',
+        summary='Can we promise this order? Checks finished goods by product, bin and OSAT against what is already reserved.',
+        what='Enter a customer order: product, bin, quantity and requested date. Plan Yukta checks the customer accepts that bin, rounds up to the customer MOQ, then looks for available-to-promise at each OSAT on the requested date, splitting across OSATs and later dates when needed. Reserve it and it is added to Reservations, so the next check sees less.',
+        how=['Supply = finished goods on hand by bin + planned pack output × bin split.',
+             'ATP in month m = the smallest (cumulative supply − cumulative reservations) from month m onwards, so a promise never takes stock an earlier reservation needs later.',
+             'OSATs with the most ATP are used first; any remainder is promised in the first later month with ATP.'],
+        tables=['reservations', 'customer_bins', 'bin_splits', 'osat_wip'],
+        tryit=['Check 2,500,000 ORION BIN_1 for Customer Alpha on the 20th of the plan start month: it is split across OSATs and part ships later.',
+               'Try LYRA BIN_3 for Customer Gamma: the shippable matrix does not allow it.']),
+    'testers': dict(
+        title='Tester Capacity',
+        summary='Tester utilisation by OSAT, step and month, testers needed against testers available, and the throughput behind it.',
+        what='The rough-cut capacity view behind Testing Starts and the sort plan. Load % is what the plan asks of the testers before pull-in; utilisation is what they actually run after pull-in and catch-up. Above 85% is tight; above 100% the plan cannot be made on time.',
+        how=['Units per tester per month = hours per day × 3600 × OEE × working days ÷ seconds per unit.',
+             'Final test: seconds per unit = (test time + index) ÷ sites. Sort: seconds per wafer = ⌈GDPW ÷ sites⌉ ÷ stepping efficiency × (test time + index) + load time.',
+             'Testers needed = Σ load ÷ units per tester. Testers available = consignee + non-consignee, after fleet changes (and hardware limits, if switched on).'],
+        tables=['tester_fleet', 'tester_capacity', 'fleet_changes', 'hardware', 'settings'],
+        tryit=['Add a fleet change: +1 consignee tester at OSAT-A Test1 from 2027-03, and watch the spring crunch close.']),
+    'hardware': dict(
+        title='Hardware Readiness',
+        summary='Whether your consigned testers have the sockets, load boards, probe cards and instrument cards they need.',
+        what='A consignee tester only runs with a full kit of your test hardware. For each OSAT, step and month, Plan Yukta counts the kits in service plus deliveries due, and compares the hardware-ready testers with the fleet and with what the plan uses. Switch on "Limit testers to hardware-ready" in Plan settings to make Testing Starts respect it.',
+        how=['Hardware-ready testers = min over hardware types of ⌊(in service + on order arrived) ÷ per tester⌋.',
+             'Gap = consignee testers in the fleet − hardware-ready testers.'],
+        tables=['hardware', 'tester_fleet', 'settings'],
+        tryit=['Set "Limit testers to hardware-ready" to Y and see OSAT-A Test1 lose a tester until February.']),
+    'ate': dict(
+        title='ATE Economics',
+        summary='Should you buy another consignee tester? Payback, NPV and ROI against renting OSAT tester time.',
+        what='For every OSAT and test step, Plan Yukta takes the units the plan runs on non-consignee (OSAT-owned) testers and prices moving them onto 1 to 4 new consignee testers of your own, at the tester price and running cost in Plan settings. It also shows capacity slack against your buffer, and any shortfall a new tester would recover.',
+        how=['Monthly saving = units moved × (non-consignee rate − consignee rate) − testers × running cost.',
+             'Units moved = min(average non-consignee units per month, testers × units one tester makes for this product mix).',
+             'Payback (months) = price × testers ÷ monthly saving. NPV = −price × testers + Σ saving ÷ (1 + rate/12)^t over the analysis months.',
+             'Slack = testers available − testers needed × (1 + capacity buffer %).'],
+        tables=['settings', 'tester_capacity', 'tester_fleet'],
+        tryit=['Change Tester price USD to 300000 and see which investments turn positive.']),
+    'npi': dict(
+        title='NPI Management',
+        summary='New products: engineering lot timeline, reliability qualification plan, and the risk that qualification ends after customers need parts.',
+        what='For each NPI product Plan Yukta lays out the engineering wafers through the fab and every OSAT step (cycle times from Process flow), then the qualification milestones one after another, each with its readout. If qualification finishes after the first month with customer demand, the product is flagged: production must start at risk or the demand must move.',
+        how=['Samples ready = NPI start + fab cycle time + transit + Σ OSAT cycle times.',
+             'Qualification end = samples ready + Σ (cycle days + readout days) over the milestones.',
+             'Risk = qualification end later than the first day of the first month with demand.'],
+        tables=['npi_milestones', 'products', 'process_flow', 'forecast'],
+        tryit=['In Customer forecast, delete the NOVA rows before 2027-08 (demand starts in August) and the risk clears.',
+               'Or shorten the long tests (HTOL 1000 h, HTSL 500 h) in NPI qualification plan and watch the end date move.']),
+    'fab-po': dict(
+        title='FAB PO Schedule',
+        summary='Wafer purchase orders by product and start month, with the dates they must be placed and their value.',
+        what='Every fab wafer start in the plan becomes a PO line. Its order cutoff is a set day of the month before the start month; the capacity reservation (semi-cutoff) is a set day two months before. Status is measured from the as-of date. Lines inside lead time are listed separately for expedite.',
+        how=['PAST CUTOFF: the cutoff has passed: confirm with the fab or move the start. ORDER NOW: after the semi-cutoff. UPCOMING: within 14 days of the semi-cutoff. PLANNED: later.',
+             'Value = wafers × wafer price. Ship-to = each OSAT\'s share of the wafers.'],
+        tables=['products', 'fab_wip', 'settings'],
+        tryit=['Change the As-of date to 2026-12-15 and see more lines become ORDER NOW or PAST CUTOFF.']),
+    'osat-po': dict(
+        title='OSAT PO Schedule',
+        summary='Monthly work orders for each OSAT: wafers to sort and bump, units to assemble, test and pack, with prices.',
+        what='One PO line per OSAT, product and month with every process quantity and its cost. Test quantities are insertions (including retest) priced at consignee or non-consignee rates according to which testers the plan used.',
+        how=['Cost = Σ quantity × price: Sort per wafer, Bump per wafer, Assembly per unit, Test per insertion, Pack per unit.',
+             'OSAT cutoffs use their own days (Plan settings).'],
+        tables=['osat_costs', 'tester_capacity', 'settings'],
+        tryit=['Raise OSAT-C assembly prices by 10% in OSAT price list and compare spend by vendor.']),
+    'substrate': dict(
+        title='Substrate & Lead Frame',
+        summary='Assembly material on hand and arriving at each OSAT against the assembly plan, first-in first-out, with expiry.',
+        what='Assembly cannot start without substrate (BGA) or lead frame (QFN). Plan Yukta consumes each batch first-in first-out, skips batches that have expired, writes off what expires unused, and flags months where assembly would be blocked.',
+        how=['Need = die into assembly for products whose SubstrateType is not None.',
+             'Severity: CRITICAL when ≥ 50% of the month\'s need is short, HIGH ≥ 25%, otherwise MEDIUM.'],
+        tables=['substrates', 'products'],
+        tryit=['Move the LYRA OSAT-C March delivery to 2027-01 and see the January shortage clear.']),
+    'cross-flow': dict(
+        title='Cross Flow',
+        summary='Material moved between OSATs after a step: quantities moved by month, logistics cost and rule checks.',
+        what='A cross-flow rule moves a share of one OSAT\'s output after a step to another OSAT (for example assembled at A, tested at B). The pilot shows the quantities and cost the rules imply on the current plan and checks the rules for errors. The capacity plan itself does not yet re-route the moved quantities.',
+        how=['Moved = step output at the source OSAT × rule %. Cost = moved ÷ 1,000 × cost per 1,000.',
+             'Check: active rules from one OSAT and step must not move more than 100%.'],
+        tables=['cross_flow'],
+        tryit=['Activate the inactive ORION Bump rule and see its cost.']),
+    'b2b': dict(
+        title='Monthly B2B Package',
+        summary='The rolling forecasts and work orders you send the fab and each OSAT every month, with time fences and a commit sheet.',
+        what='Each month the plan becomes a supplier package: wafer starts for the fab; sort, bump, assembly, test and pack quantities for each OSAT; and testers needed. Months are tagged Frozen (firm order), Slushy (changes within agreed flex) or Liquid (forecast only). The Excel download has a REQUEST row, a yellow COMMIT row for the supplier, and a GAP row that calculates itself.',
+        how=['Frozen = the first N months (Plan settings), Slushy = the next M, Liquid = the rest.',
+             'XML exports are simplified, RosettaNet-style messages (forecast and purchase order) for illustration, not certified PIP schemas.'],
+        tables=['settings'],
+        tryit=['Download the package, fill a few COMMIT cells lower than REQUEST, and see the GAP row go red.']),
+    'pva': dict(
+        title='Plan vs Actual',
+        summary='What each OSAT delivered against the frozen plan, OEE, disruptions, a reliability score and recovery actions.',
+        what='Compares the plan you committed to for past months with what the vendors reported, and turns misses into recovery actions based on the disruption reported.',
+        how=['Attainment = actual ÷ planned. OEE = availability × performance × quality.',
+             'Reliability score = 50% × attainment (capped at 100) + 30% × OEE + 20% × (100 − disruption days ÷ 30.4 × 100) averaged over rows.'],
+        tables=['plan_snapshot', 'actuals'],
+        tryit=['Enter October actuals for OSAT-B below plan with Disruption "Tester down" and see a new recovery action.']),
+    'snapshots': dict(
+        title='Snapshot Comparison',
+        summary='Save the current plan, change data, and compare: demand, test starts, wafer starts and shortages by product and month.',
+        what='A snapshot freezes the plan as it is now. After you change data (or upload new data next month), compare the live plan with a snapshot to see exactly what moved. Snapshots are kept with your workspace.',
+        tables=[]),
+    'cost': dict(
+        title='Cost Planning',
+        summary='Spend by OSAT, process and month, and the standard cost of one good unit per product, built up from yields.',
+        what='Spend is what the plan will pay: wafers to the fab, sort and bump per wafer, assembly per unit, test per insertion, pack per unit. Standard cost rolls every price up to one good finished unit, dividing by the yields after each step, so a yield loss raises the cost of everything upstream.',
+        how=['Wafer cost per good unit = wafer price ÷ (GDPW × all yields).',
+             'Step cost per good unit = price per unit at that step ÷ product of the yields from that step to finished goods (test steps × (1 + retest)).',
+             'Test rates are blended by the share of units the plan runs on non-consignee testers.'],
+        tables=['osat_costs', 'tester_capacity', 'products', 'process_flow'],
+        tryit=['Raise ORION Wafer price from 850 to 950 and see standard cost and P&L change.']),
+    'pnl': dict(
+        title='Profit & Loss',
+        summary='Projected revenue, cost of goods and gross margin by product, customer and month, from the shipments the plan can make.',
+        what='Revenue uses planned shipments, not demand: a supply shortfall shows up as lost revenue. Booked orders are priced at each customer\'s price; the rest of the shipments at the default price. COGS uses standard cost. Loss-making lines are flagged.',
+        how=['Revenue = shipped units × ASP. COGS = shipped units × standard cost. Gross margin = revenue − COGS.',
+             'Yield-loss sensitivity: COGS × (1 + x%).'],
+        tables=['pricing', 'orders', 'osat_costs', 'products'],
+        tryit=['Raise ATLAS default ASP from 0.14 to 0.17 to see it turn profitable.']),
+    'osat-wip': dict(
+        title='OSAT WIP Snapshot',
+        summary='Every lot at every OSAT, translated from each vendor\'s own product codes and operation names, with holds.',
+        what='Each OSAT reports WIP its own way. Plan Yukta maps vendor product codes and operation names to your SKUs and standard steps, totals WIP by product and step, and lists lots on hold. Lots on hold are not counted as supply unless Plan settings say so; release one here and the plan uses it straight away. Unmapped lots are listed so you can fix the mapping.',
+        how=['Supply now = WIP × step yield (lots still in process) + finished-at-step lots.',
+             'Tester load now = units waiting at a test step × (1 + retest), half of it for lots already running.'],
+        tables=['osat_wip', 'product_codes', 'operation_codes'],
+        tryit=['Release the held ORION lot at OSAT-B and see supply increase.',
+               'Map OR9000B-ENG to ORION in Vendor product codes to bring the unmapped lot in.']),
+    'audit': dict(
+        title='Lot-level WIP Audit',
+        summary='Upload the foundry WIP, shipment and daily OSAT WIP reports to de-duplicate OSAT rows, check capacity and measure lot lead times.',
+        what='A separate tool from the planning modules. It reads raw supplier reports in the lot-level audit template and removes double-counted OSAT rows with five rules, checks the active die against what the fab shipped, and measures lead time per lot.',
+        tables=[]),
+    'data': dict(title='Data tables', summary='Every table the modules read. Open one to view, edit, upload or download it.'),
+    'sku-setup': dict(
+        title='SKU Setup Wizard',
+        summary='Add a new product in one step: clone an existing product\'s flow, test times, bins and prices, then adjust.',
+        what='The wizard writes the new product into every table it needs: Products, Process flow, Bin splits, Test times & rates (for the vendors you choose), Selling prices, OSAT price list and Customer forecast. Open those tables afterwards to fine-tune.',
+        tables=['products', 'process_flow', 'bin_splits', 'tester_capacity', 'pricing', 'forecast']),
+    'checks': dict(title='Data checks', summary='Problems in the data that change or stop the plan: unmapped lots, missing test times, bins that do not add up, and more.'),
+    'io': dict(title='Import / Export', summary='Download the whole workspace as one Excel workbook, edit it offline, and upload it again. Or start over from the demo data.'),
+    'tour': dict(title='Demo tour', summary='Ten minutes through Plan Yukta, with the experiments that show what it does.'),
+    'method': dict(title='How it calculates', summary='Every formula the modules use.'),
+}
+
+
+def nav_groups():
+    groups = []
+    for g in GROUP_ORDER:
+        groups.append((g, [n for n in NAV if n[1] == g]))
+    return groups
+
+
+def label(key):
+    return next((n[2] for n in NAV if n[0] == key), key)
+
+
+def icon(key):
+    return next((n[3] for n in NAV if n[0] == key), 'table')
+
+
+def next_key(key):
+    keys = [n[0] for n in NAV]
+    if key in keys and keys.index(key) + 1 < len(keys):
+        return keys[keys.index(key) + 1]
+    return None
+
+
+TOUR = [
+    ('home', 'Start at the cockpit', 'The cockpit runs the full plan on the demo data: five products, three OSATs, one foundry. Read the alerts: a tester crunch at OSAT-A in spring, wafers inside fab lead time, a substrate shortage, and an NPI product whose qualification ends after customers want it.'),
+    ('demand', 'See what the plan builds to', 'Each product has a build strategy. ATLAS (end of life) builds to booked orders only; ORION and VEGA to the larger of forecast and orders; LYRA blends the customer and statistical forecasts. The chart shows 12 months of history and the plan.'),
+    ('testing', 'Find the tester crunch', 'OSAT-A Test1 is overloaded in May and June (load above 100%) and tight around them. Plan Yukta builds ahead with idle testers in March and April (pull-in) and makes the rest in July, when two new testers arrive (catch-up). The grid shows each product\'s testers, pull-in and shortfall by month.'),
+    ('data', 'Change the data and break the plan', 'Open Tester fleet, change OSAT-A Test1 Consignee from 6 to 4, and save. Go back to the cockpit: now customers are short, P&L loses revenue and ATE Economics shows the shortfall a new tester would recover. Use "Reset to demo" on the table to undo.'),
+    ('osat-wip', 'Release a held lot', 'Three lots are on hold. Release the ORION lot at OSAT-B and its units count as supply again.'),
+    ('atp', 'Promise an order', 'Check 2,500,000 ORION BIN_1 for Customer Alpha on the 20th of the first month. It splits across the three OSATs and part ships the next month. Reserve it, then check again: there is less to promise.'),
+    ('fab-po', 'Place the wafer orders', 'Each wafer start is a PO line with its cutoff dates. Lines past cutoff are the frozen zone; the expedite table lists wafers needed sooner than the fab can make them.'),
+    ('b2b', 'Send the monthly package', 'Download the B2B workbook: fab and OSAT forecasts with Frozen, Slushy and Liquid months and a COMMIT row for each supplier to fill in.'),
+    ('npi', 'Check the new product', 'NOVA\'s qualification ends in July but customers want it from April. Push NOVA\'s forecast out to August, or shorten the longest tests, and the risk clears.'),
+    ('io', 'Use your own data', 'Download the workspace as Excel, replace the demo rows with your own (anonymised if needed), and upload it. Every module then runs on your data.'),
+]

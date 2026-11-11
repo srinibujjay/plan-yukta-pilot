@@ -1,0 +1,61 @@
+{% extends 'base.html' %}
+{% block title %}{{ meta.title }} · Data · Plan Yukta{% endblock %}
+{% block body %}
+<div class="page-head">
+  <div><span class="tagnum">Data table · {{ meta.group }}</span><h1>{{ meta.title }}</h1><p class="lead">{{ meta.about }}</p>
+    <p class="small muted" style="margin-top:6px">Used by: {{ meta.used_by|join(', ') }}{% if table in edited %} · <span style="color:var(--warn)">edited</span>{% endif %}</p></div>
+  <div class="actions"><a class="btn ghost" href="/data">All tables</a></div>
+</div>
+
+{% for i in issues %}<div class="callout {{ 'bad' if i.severity == 'error' else 'warn' if i.severity == 'warning' else 'info' }}">{{ i.message }}</div>{% endfor %}
+
+<section class="panel">
+  <div class="dg-bar">
+    {% if not meta.keyed %}
+    <button class="btn ghost sm" id="dg-add" type="button">+ Add row</button>
+    <button class="btn ghost sm" id="dg-dup" type="button">Duplicate selected</button>
+    <button class="btn danger sm" id="dg-del" type="button">Delete selected</button>
+    {% endif %}
+    <input type="search" id="dg-filter" placeholder="Filter rows…" aria-label="Filter rows" style="width:200px">
+    <span class="spacer"></span>
+    <span class="dg-status" id="dg-status"></span>
+    <button class="btn ghost sm" id="dg-undo" type="button" disabled>Discard changes</button>
+    <button class="btn" id="dg-save" type="button" disabled>Save &amp; re-plan</button>
+  </div>
+  <div id="dg-errors"></div>
+  <div class="tablewrap tall">
+    <table class="dg" id="dg">
+      <thead><tr><th></th><th class="r">#</th>{% for c in meta.columns %}<th data-col="{{ c.name }}" class="sortable" title="{{ c.help }}">{{ c.name }}{% if c.required and not c.readonly %}<span class="req">*</span>{% endif %}</th>{% endfor %}</tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+  <div class="pager"><button class="btn ghost sm" id="dg-prev" type="button">‹ Prev</button><span id="dg-page"></span><button class="btn ghost sm" id="dg-next" type="button">Next ›</button></div>
+</section>
+
+<div class="cols">
+  <section class="panel">
+    <h2>Columns</h2>
+    <p class="sub">* = required. Click a column heading in the table to sort by it.</p>
+    <div class="colhelp">
+      {% for c in meta.columns %}<div><b>{{ c.name }}</b>{% if c.required and not c.readonly %}*{% endif %} <span class="muted">· {{ {'text':'text','int':'whole number','num':'number','frac':'fraction 0-1 (95 or 95% also accepted)','month':'month YYYY-MM','date':'date YYYY-MM-DD','choice':'one of: ' ~ (c.choices|join(', ') if c.choices else '')}[c.type] }}</span>{% if c.help %}<br><span class="small">{{ c.help }}</span>{% endif %}</div>{% endfor %}
+    </div>
+  </section>
+  <section class="panel">
+    <h2>Bring your own data</h2>
+    <p class="sub">Download this table, edit it in Excel, and upload it back. The upload replaces the whole table; headings are matched ignoring case and spaces. If any row has a problem, nothing is changed.</p>
+    <div class="actions">
+      <a class="btn ghost" href="/data/{{ table }}.csv">Download CSV</a>
+      <a class="btn ghost" href="/workspace.xlsx">Download whole workspace (.xlsx)</a>
+    </div>
+    <form method="post" action="/data/{{ table }}/upload" enctype="multipart/form-data" class="actions" data-confirm="Replace every row of {{ meta.title }} with the uploaded file?">
+      <input type="file" name="file" accept=".csv,.xlsx" required aria-label="CSV or Excel file">
+      <button class="btn" type="submit">Upload &amp; replace</button>
+    </form>
+    <form method="post" action="/data/{{ table }}/reset" data-confirm="Reset {{ meta.title }} to the demo data?">
+      <button class="btn danger sm" type="submit">Reset this table to the demo data</button>
+    </form>
+  </section>
+</div>
+<script type="application/json" id="dg-payload">{{ payload|safe }}</script>
+{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='grid.js') }}" defer></script>{% endblock %}

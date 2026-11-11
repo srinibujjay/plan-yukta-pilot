@@ -1,0 +1,37 @@
+{% extends 'base.html' %}
+{% from '_macros.html' import head, about with context %}
+{% block body %}
+{{ head(page) }}
+{{ about(page.info, key, ws) }}
+<section class="panel">
+  <h2>Save the plan as it is now</h2>
+  <form method="post" action="/snapshots/save" class="inline-form">
+    <input name="name" placeholder="e.g. Baseline before tester change" maxlength="60" style="width:300px" aria-label="Snapshot name">
+    <button class="btn" type="submit">Save snapshot</button>
+  </form>
+  <p class="sub">Then change data (for example cut testers in Tester fleet, or raise the demand uplift) and come back here to see what moved.</p>
+  {% if page.snaps %}
+  <div class="chips">{% for s in page.snaps %}<a class="chip {{ 'on' if page.sel and s.id == page.sel.id }}" href="?snap={{ s.id }}">{{ s.name }} · {{ s.created }}</a>{% endfor %}</div>
+  {% endif %}
+</section>
+{% if page.sel %}
+<section class="panel">
+  <div class="panel-head"><h2>Changes since "{{ page.sel.name }}"</h2>
+    <form method="post" action="/snapshots/delete"><input type="hidden" name="id" value="{{ page.sel.id }}"><button class="btn danger sm" type="submit">Delete snapshot</button></form></div>
+  <p class="sub">Saved {{ page.sel.created }}{% if page.sel.edited %}, when these tables had been edited: {{ page.sel.edited|join(', ') }}{% endif %}. Only rows that changed are listed.</p>
+  {% if page.rows %}
+  <div class="table-tools"><input type="search" placeholder="Filter rows…" data-filter="snapdiff"></div>
+  <div class="tablewrap tall"><table id="t-snapdiff" class="sortable-table">
+    <thead><tr><th class="sortable" data-col="0">Product</th><th class="sortable" data-col="1">Month</th><th class="sortable" data-col="2">Measure</th>
+      <th class="sortable r" data-col="3">Snapshot</th><th class="sortable r" data-col="4">Now</th><th class="sortable r" data-col="5">Change</th><th class="sortable r" data-col="6">Change %</th></tr></thead>
+    <tbody>{% for r in page.rows %}<tr><td>{{ r.sku }}</td><td data-v="{{ r.month }}">{{ r.month|fmt('month') }}</td><td>{{ r.metric }}</td>
+      <td class="r" data-v="{{ r.snap }}">{{ r.snap|fmt('int') }}</td><td class="r" data-v="{{ r.now }}">{{ r.now|fmt('int') }}</td>
+      <td class="r" data-v="{{ r.delta }}" style="color:{{ 'var(--ok)' if r.delta > 0 else 'var(--bad)' }}">{{ '+' if r.delta > 0 }}{{ r.delta|fmt('int') }}</td>
+      <td class="r" data-v="{{ r.pct if r.pct is not none else '' }}">{{ ('%+.1f%%'|format(r.pct)) if r.pct is not none else 'new' }}</td></tr>{% endfor %}</tbody>
+  </table></div>
+  {% else %}<p class="muted">Nothing has changed since this snapshot. Edit some data and come back.</p>{% endif %}
+</section>
+{% elif not page.snaps %}
+<div class="callout info">No snapshots yet. Save one above to start comparing.</div>
+{% endif %}
+{% endblock %}

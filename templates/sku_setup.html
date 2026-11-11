@@ -1,0 +1,36 @@
+{% extends 'base.html' %}
+{% from '_macros.html' import head, about with context %}
+{% block body %}
+{{ head(page) }}
+{{ about(page.info, key, ws) }}
+<form method="post" action="/sku-setup/create">
+<section class="panel">
+  <h2>1 · Basic information</h2>
+  <div class="formgrid">
+    <label>New product name *<input name="sku" required maxlength="20" placeholder="e.g. ORION-PLUS" pattern="[A-Za-z0-9_\-]+"></label>
+    <label>Description<input name="desc" maxlength="80" placeholder="Short description"></label>
+    <label>Clone everything from *<select name="clone">{% for p in products %}<option>{{ p.SKU }}</option>{% endfor %}</select></label>
+    <label>Status<select name="status"><option>NPI</option><option>HVM</option></select></label>
+    <label>NPI start date<input type="date" name="npi_start" value="{{ R.plan.as_of }}"></label>
+    <label>Package<input name="Package" placeholder="keep the clone's"></label>
+    <label>Gross die per wafer<input name="GDPW" inputmode="numeric" placeholder="keep the clone's"></label>
+    <label>Wafer price USD<input name="WaferPriceUSD" inputmode="decimal" placeholder="keep the clone's"></label>
+    <label>Yield change vs clone (points)<input type="number" name="yield_adj" value="0" min="-50" max="20" step="1"></label>
+  </div>
+</section>
+<section class="panel">
+  <h2>2 · Vendors</h2>
+  <p class="sub">Test times are copied from the clone for these OSATs. Untick an OSAT to leave it out.</p>
+  <div class="actions">{% for v in vendors %}<label style="display:flex;gap:6px;align-items:center"><input type="checkbox" name="vendors" value="{{ v.Vendor }}" checked> OSAT-{{ v.Vendor }}</label>{% endfor %}</div>
+</section>
+<section class="panel">
+  <h2>3 · Forecast</h2>
+  <div class="formgrid">
+    <label>First forecast month<select name="fc_start">{% for m in months %}<option value="{{ m }}" {{ 'selected' if loop.index0 == 4 }}>{{ mlabel(m) }}</option>{% endfor %}</select></label>
+    <label style="grid-column: span 2">Monthly units, separated by spaces<input name="fc_qty" placeholder="50000 100000 150000 200000 250000 300000"></label>
+  </div>
+</section>
+<div class="actions"><button class="btn" type="submit">Create product &amp; re-plan</button></div>
+</form>
+{% if args.new %}<div class="callout ok">Next: look at <a href="/m/npi">NPI Management</a>, <a href="/m/testing?sku={{ args.new }}">Testing Starts</a> or fine-tune <a href="/data/process_flow">Process flow</a> for {{ args.new }}.</div>{% endif %}
+{% endblock %}

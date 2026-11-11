@@ -1,14 +1,24 @@
-{% extends 'base.html' %}
-{% block title %}Plan Yukta pilot · sign in{% endblock %}
-{% block body %}
-<section class="panel login">
-  <h2>Pilot access</h2>
-  <p class="sub">Plan Yukta is in a closed testing phase. Enter the access code you were sent.</p>
-  {% if error %}<div class="error">{{ error }}</div>{% endif %}
-  <form method="post">
-    <input type="password" name="code" placeholder="Access code" autocomplete="current-password" required autofocus>
-    <button class="btn" type="submit">Sign in</button>
-  </form>
-  <p class="muted small" style="margin-top:14px">No code? Ask the person who invited you to the pilot.</p>
-</section>
-{% endblock %}
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sign in · Plan Yukta</title>
+  <script>try{var t=localStorage.getItem('py-theme');if(t)document.documentElement.dataset.theme=t;}catch(e){}</script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
+</head>
+<body>
+<div style="min-height:100vh;display:grid;place-items:center;padding:20px">
+  <div class="panel" style="width:100%;max-width:420px;padding:28px">
+    <div style="display:flex;gap:10px;align-items:center;margin-bottom:14px">
+      <svg width="30" height="30" viewBox="0 0 34 34" aria-hidden="true"><rect x="6" y="6" width="22" height="22" rx="5" fill="none" stroke="#3b82f6" stroke-width="2"/><rect x="12" y="12" width="10" height="10" rx="2" fill="#3b82f6"/></svg>
+      <b style="font-size:18px">Plan Yukta</b></div>
+    <h1 style="font-size:20px">Pilot access</h1>
+    <p class="muted">Enter the access code you were sent. Each tester has their own code.</p>
+    {% if error %}<div class="callout bad">{{ error }}</div>{% endif %}
+    <form method="post"><label>Access code<input name="code" type="password" autocomplete="current-password" required autofocus style="width:100%;margin:6px 0 14px"></label>
+      <button class="btn" type="submit" style="width:100%;justify-content:center">Sign in</button></form>
+  </div>
+</div>
+</body>
+</html>

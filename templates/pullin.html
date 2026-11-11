@@ -1,0 +1,30 @@
+{% extends 'base.html' %}
+{% from '_macros.html' import head, about with context %}
+{% block body %}
+{{ head(page) }}
+{{ about(page.info, key, ws, open=True) }}
+<form method="post" action="/pullin/save">
+<section class="panel">
+  <div class="panel-head"><h2>Pull-in strategy by product</h2>
+    <label>Pull-in horizon (months ahead) <input type="number" name="horizon" value="{{ page.horizon }}" min="0" max="12" step="1" style="width:70px"></label></div>
+  <p class="sub">The smaller of service level and max pull-in % is the share of a future tester shortfall that may be built early. Priority decides who gets scarce testers first.</p>
+  <div class="tablewrap"><table>
+    <thead><tr><th>Product</th><th>Pull-in</th><th class="r">Service level %</th><th class="r">Max pull-in %</th><th class="r">Effective cap</th>
+      <th class="r">Priority</th><th class="r">Safety stock (weeks)</th><th class="r">Built early</th><th class="r">Shortfall covered</th><th class="r">Still short (made late)</th></tr></thead>
+    <tbody>
+    {% for r in page.rows %}<tr>
+      <td><b>{{ r.sku }}</b></td>
+      <td><select name="pull_{{ r.sku }}"><option value="Y" {{ 'selected' if r.pull == 'Y' }}>On</option><option value="N" {{ 'selected' if r.pull != 'Y' }}>Off</option></select></td>
+      <td class="r"><input type="number" name="sl_{{ r.sku }}" value="{{ r.sl|round(0)|int }}" min="0" max="100" style="width:80px"></td>
+      <td class="r"><input type="number" name="max_{{ r.sku }}" value="{{ r.max|round(0)|int }}" min="0" max="100" style="width:80px"></td>
+      <td class="r mono">{{ r.cap|round(0)|int }}%</td>
+      <td class="r"><input type="number" name="prio_{{ r.sku }}" value="{{ r.prio }}" min="0" max="10" style="width:64px"></td>
+      <td class="r"><input type="number" name="ss_{{ r.sku }}" value="{{ r.ss }}" min="0" max="26" step="0.5" style="width:70px"></td>
+      <td class="r mono">{{ r.pulled|short }}</td><td class="r mono">{{ r.covered|short }}</td>
+      <td class="r mono" style="{{ 'color:var(--bad);font-weight:600' if r.left > 0.5 }}">{{ r.left|short }}</td>
+    </tr>{% endfor %}
+    </tbody></table></div>
+  <div class="actions" style="margin-top:12px"><button class="btn" type="submit">Save &amp; re-plan</button><a class="btn ghost" href="/m/testing">See the effect in Testing Starts</a></div>
+</section>
+</form>
+{% endblock %}

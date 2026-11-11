@@ -1,0 +1,824 @@
+"""
+Page builders. Each returns a dict the generic module template renders:
+  title, summary, filters, sections = [kpis | chart | table | grid | html | cols]
+"""
+from __future__ import annotations
+
+from collections import defaultdict
+from datetime import timedelta
+from html import escape
+
+from . import charts
+from .cockpit import FLOW_ORDER, PAD, TEST_OPS, month_add
+from .modules import INFO
+
+VENDOR_NAME = lambda v: f'OSAT-{v}'
+
+
+# ------------------------------------------------------------------ helpers
+def K(label, value, sub='', tone=''):
+    return dict(label=label, value=value, sub=sub, tone=tone)
+
+
+def n0(v):
+    return '–' if v is None else f'{v:,.0f}'
+
+
+def short(v):
+    if v is None:
+        return '–'
+    a = abs(v)
+    if a >= 1e9:
+        return f'{v / 1e9:.2f}B'
+    if a >= 1e6:
+        return f'{v / 1e6:.2f}M'
+    if a >= 1e4:
+        return f'{v / 1e3:.0f}k'
+    return f'{v:,.0f}'
+
+
+def money(v, nd=0):
+    if v is None:
+        return '–'
+    a = abs(v)
+    if nd == 0 and a >= 1e6:
+        return f'${v / 1e6:,.2f}M'
+    if nd == 0 and a >= 1e4:
+        return f'${v / 1e3:,.0f}k'
+    return f'${v:,.{nd}f}'
+
+
+def mlabel(m):
+    names = 'Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec'.split()
+    return f'{names[int(m[5:7]) - 1]} {m[2:4]}'
+
+
+def table(title, cols, rows, note='', tid=None, limit=None, search=True, empty='Nothing to show.'):
+    return {'type': 'table', 'title': title, 'note': note, 'cols': cols, 'rows': rows, 'id': tid or title.lower().replace(' ', '-'),
+            'limit': limit, 'search': search, 'empty': empty}
+
+
+def col(key, label, fmt='text', tone=None, align=None):
+    return {'key': key, 'label': label, 'fmt': fmt, 'tone': tone,
+            'align': align or ('r' if fmt not in ('text', 'badge', 'month', 'date', 'link') else 'l')}
+
+
+def grid(title, months, groups, note=''):
+    return {'type': 'grid', 'title': title, 'note': note, 'months': [mlabel(m) for m in months], 'groups': groups}
+
+
+def cell(v, tone='', fmt='short'):
+    if v is None or (isinstance(v, float) and abs(v) < 0.5 and fmt != 'pct'):
+        return ('–', tone)
+    if fmt == 'pct':
+        return (f'{v:.0f}%', tone)
+    if fmt == 'num1':
+        return (f'{v:,.1f}', tone)
+    if fmt == 'int':
+        return (f'{v:,.0f}', tone)
+    return (short(v), tone)
+
+
+def util_tone(u):
+    return 'bad' if u > 100.5 else 'warn' if u > 85 else 'ok' if u > 0 else ''
+
+
+def chart(title, html, note=''):
+    return {'type': 'chart', 'title': title, 'html': html, 'note': note}
+
+
+def html(h):
+    return {'type': 'html', 'html': h}
+
+
+def cols2(*sections):
+    return {'type': 'cols', 'items': list(sections)}
+
+
+def callout(text, tone='info'):
+    return html(f'<div class="callout {tone}">{text}</div>')
+
+
+def apply_filters(rows, args, keys=('sku', 'vendor')):
+    out = rows
+    for k in keys:
+        v = args.get(k)
+        if v:
+            out = [r for r in out if str(r.get(k)) == v]
+    return out
+
+
+def filter_spec(R, which=('sku', 'vendor')):
+    p = R['plan']
+    spec = []
+    if 'sku' in which:
+        spec.append(('sku', 'Product', sorted({c.sku for c in p.chains})))
+    if 'vendor' in which:
+        spec.append(('vendor', 'OSAT', sorted({c.vendor for c in p.chains})))
+    return spec
+
+
+def page(key, sections, filters=None, extra=None):
+    info = INFO.get(key, {})
+    d = {'key': key, 'title': info.get('title', key), 'summary': info.get('summary', ''), 'info': info,
+         'sections': sections, 'filters': filters or []}
+    d.update(extra or {})
+    return d
+
+
+# ------------------------------------------------------------------ cockpit
+def home(R, args):
+    p, h = R['plan'], R['home']
+    months = p.months
+    pk = h['load_peak']
+    sections = [
+        {'type': 'kpis', 'items': [
+            K('Demand, next 6 months', short(h['demand6']), 'units, all products'),
+            K('Customer shortfall', short(h['short']) if h['short'] > 0.5 else 'None', 'units late or short in the horizon',
+              'bad' if h['short'] > 0.5 else 'ok'),
+            K('Peak tester load', f'{pk[0]:.0f}%', f'OSAT-{pk[1]} {pk[2]}, {mlabel(pk[3])}' if pk[1] else '',
+              util_tone(pk[0])),
+            K('Wafer POs to act on', f'{len(h["po_due"])}', 'past cutoff or order now', 'warn' if h['po_due'] else 'ok'),
+            K('Lots on hold', f'{len(h["holds"])}', 'not counted as supply', 'warn' if h['holds'] else 'ok'),
+            K('Plan revenue', money(h['revenue']), f'{h["gm"]:.1f}% gross margin, {len(months)} months'),
+            K('Data checks', f'{h["errors"]} / {h["warnings"]}', 'errors / warnings', 'bad' if h['errors'] else 'warn' if h['warnings'] else 'ok'),
+        ]},
+    ]
+    m = args.get('month') if args.get('month') in months else months[0]
+    i = months.index(m)
+    t = R['flow']['totals']
+    stages = [('Fab starts', short(t['fab_starts'][i]), 'wafers', 'fab'),
+              ('Sort', short(t['Sort'][i]), 'wafers', 'sort'), ('Bump', short(t['Bump'][i]), 'wafers', 'bump'),
+              ('Assembly', short(t['Assembly'][i]), 'units', 'assy'), ('Test 1', short(t['Test1'][i]), 'units', 'test'),
+              ('Test 2', short(t['Test2'][i]), 'units', 'test'), ('Pack', short(t['Pack'][i]), 'units', 'pack'),
+              ('Ship', short(t['ship'][i]), 'units', 'ship' if t['short'][i] < 0.5 else 'bad')]
+    month_links = ' '.join(f'<a class="chip{" on" if mm == m else ""}" href="?month={mm}">{mlabel(mm)}</a>' for mm in months)
+    sections.append(chart(f'Plan for {mlabel(m)}: starts at every step',
+                          f'<div class="chips">{month_links}</div>' + charts.flow_diagram(stages),
+                          'Starts in the month at each step, all products and OSATs. Fab starts feed customers about four months later.'))
+    # tester heatmap
+    groups = []
+    rows = []
+    for (v, st), a in sorted(p.alloc.items(), key=lambda kv: (TEST_OPS.index(kv[0][1]), kv[0][0])):
+        cells = [cell(x['load_util'], util_tone(x['load_util']), 'pct') for x in a['summary'][:p.H]]
+        rows.append({'label': f'OSAT-{v} · {st}', 'cells': cells, 'href': f'/m/testers?vendor={v}'})
+    groups.append({'title': '', 'rows': rows})
+    sections.append(grid('Tester load by OSAT and step', months, groups,
+                         'Load before pull-in, as % of the testers available. Amber above 85%, red above 100%.'))
+    # demand vs supply chart
+    sections.append(chart('Demand and shipments, all products', charts.bars(
+        months, [('Shipped', t['ship']), ('Short', t['short'])],
+        lines=[('Demand', t['demand'])], title='Demand and shipments')))
+    al = [dict(a, link=MODULE_LINK.get(a['module'], '/')) for a in h['alerts']]
+    sections.append(table('Alerts', [col('severity', 'Level', 'badge'), col('module', 'Module', 'link'),
+                                     col('month', 'Month', 'month'), col('sku', 'Product / resource'), col('text', 'What it means')],
+                          al, tid='alerts', empty='No alerts: the plan can be made as it stands.'))
+    return page('home', sections)
+
+
+MODULE_LINK = {'FAB PO': '/m/fab-po', 'Substrate': '/m/substrate', 'Complete Flow': '/m/flow', 'Testing Starts': '/m/testing',
+               'NPI': '/m/npi', 'Hardware': '/m/hardware'}
+
+
+# ------------------------------------------------------------------ demand
+def demand(R, args):
+    p = R['plan']
+    rows = R['demand']['rows']
+    sel = args.get('sku') or None
+    show = [r for r in rows if not sel or r['sku'] == sel]
+    sections = []
+    tot = sum(sum(r['plan'][:p.H]) for r in rows)
+    sections.append({'type': 'kpis', 'items': [
+        K('Plan demand', short(tot), f'units over {p.H} months'),
+        K('Booked orders', short(sum(sum(r['orders'][:p.H]) for r in rows)), 'units in the horizon'),
+        K('Uplift', f'{float(p.s["Demand uplift %"]):+.0f}%', 'Plan settings'),
+        K('Products', str(len(rows)), ', '.join(sorted({r['strategy'] for r in rows}))),
+    ]})
+    for r in show:
+        hm = r['hist_months']
+        labels = hm + p.months
+        hist = r['hist'] + [None] * p.H
+        k = len(hm)
+        plan = [None] * (k - 1) + ([r['hist'][-1]] if k else []) + r['plan'][:p.H]
+        fc = [None] * k + [v or None for v in r['forecast'][:p.H]]
+        st = [None] * k + r['stat'][:p.H]
+        od = [None] * k + [v or None for v in r['orders'][:p.H]]
+        acc = r['acc']
+        acc_t = (f'Statistical forecast accuracy (last 6 months): WMAPE {acc["wmape"]:.1f}%, bias {acc["bias"]:+.1f}%.'
+                 if acc else 'Not enough history for a statistical forecast; the customer forecast is used.')
+        sections.append(chart(f'{r["sku"]} · {r["status"]} · build strategy {r["strategy"]}', charts.lines(
+            labels, [('Shipped (history)', hist, False), ('Plan demand', plan, False), ('Customer forecast', fc, True),
+                     ('Statistical (Holt)', st, True), ('Booked orders', od, False)], split_at=k, title=r['sku']), acc_t))
+    months = p.months
+    groups = []
+    for r in show:
+        groups.append({'title': r['sku'], 'sub': r['strategy'], 'rows': [
+            {'label': 'Customer forecast', 'cells': [cell(v) for v in r['forecast'][:p.H]]},
+            {'label': 'Booked orders', 'cells': [cell(v) for v in r['orders'][:p.H]]},
+            {'label': 'Statistical (Holt)', 'cells': [cell(v) for v in r['stat'][:p.H]]},
+            {'label': 'Plan demand', 'cells': [cell(v, 'strong') for v in r['plan'][:p.H]], 'strong': True},
+            {'label': 'Order coverage', 'cells': [cell(v, '', 'pct') if v is not None else ('–', '') for v in r['order_cover'][:p.H]]},
+        ]})
+    sections.append(grid('Demand by month', months, groups, 'Units. Plan demand includes the demand uplift.'))
+    return page('demand', sections, filters=filter_spec(R, ('sku',)))
+
+
+# ------------------------------------------------------------------ M1 testing
+def testing(R, args):
+    p = R['plan']
+    T = R['testing']
+    lines = apply_filters(T['lines'], args)
+    step = args.get('step')
+    if step:
+        lines = [l for l in lines if l['step'] == step]
+    by = defaultdict(list)
+    for l in lines:
+        by[(l['sku'], l['vendor'], l['step'])].append(l)
+    tot_ins = sum(l['ins_req'] for l in lines)
+    tot_gap = sum(l['gap'] for l in lines)
+    tot_pull = sum(l['pullin'] for l in lines)
+    nc = sum(l['tn'] for l in lines)
+    sections = [{'type': 'kpis', 'items': [
+        K('Test insertions', short(tot_ins), f'units incl. retest, {p.H} months'),
+        K('Pull-in', short(tot_pull), 'units built ahead with idle testers', 'warn' if tot_pull > 0.5 else ''),
+        K('Short after pull-in', short(tot_gap) if tot_gap > 0.5 else 'None', 'made late (catch-up)', 'bad' if tot_gap > 0.5 else 'ok'),
+        K('Non-consignee tester-months', f'{nc:,.1f}', 'OSAT testers used (higher rate)', 'warn' if nc > 0.05 else ''),
+    ]}]
+    # chart: test starts by vendor
+    months = p.months
+    series = []
+    for v in sorted({l['vendor'] for l in lines}):
+        series.append((f'OSAT-{v}', [sum(l['prod'] for l in lines if l['vendor'] == v and l['month'] == m) for m in months]))
+    load = [sum(l['ins_req'] for l in lines if l['month'] == m) for m in months]
+    sections.append(chart('Test insertions made, by OSAT', charts.bars(months, series, lines=[('Load required', load)], title='Test insertions'),
+                          'Bars: insertions the testers make (including pull-in and catch-up). Line: what the plan asks for in the month.'))
+    groups = []
+    for (sku, v, st), ls in sorted(by.items(), key=lambda kv: (kv[0][1], kv[0][2], kv[0][0])):
+        ls.sort(key=lambda l: l['month'])
+        u = ls[0]['upm']
+        groups.append({'title': f'{sku} · OSAT-{v} · {st}', 'sub': f'share {ls[0]["share"]:.0f}% · {u:,.0f} units per tester-month',
+                       'rows': [
+                           {'label': 'Test yield / retest', 'cells': [(f'{l["yield"]:.0f}% / {l["rework"]:.0f}%', '') for l in ls]},
+                           {'label': 'Starts required', 'cells': [cell(l['starts_req']) for l in ls]},
+                           {'label': 'Tester load (insertions)', 'cells': [cell(l['ins_req']) for l in ls]},
+                           {'label': 'Consignee testers', 'cells': [cell(l['tc'], '', 'num1') for l in ls]},
+                           {'label': 'Non-consignee testers', 'cells': [cell(l['tn'], 'warn' if l['tn'] > 0.05 else '', 'num1') for l in ls]},
+                           {'label': 'Made', 'cells': [cell(l['prod'], 'strong') for l in ls], 'strong': True},
+                           {'label': 'Pull-in (built early)', 'cells': [cell(l['pullin'], 'info' if l['pullin'] > 0.5 else '') for l in ls]},
+                           {'label': 'Short (after pull-in)', 'cells': [cell(l['gap'], 'bad' if l['gap'] > 0.5 else '') for l in ls]},
+                       ]})
+    sections.append(grid('Testing starts and tester allocation', months, groups,
+                         'Units. Testers are tester-months: 0.5 means half a tester for the month. Pull-in is made in that month for a later shortfall.'))
+    if T['late']:
+        lt = [dict(r, vendor=f'OSAT-{r["vendor"]}') for r in apply_filters(
+            [dict(x) for x in T['late']], args)]
+        sections.append(table('Needed before the plan start (inside lead time)', [
+            col('sku', 'Product'), col('vendor', 'OSAT'), col('op', 'Step'), col('qty', 'Quantity', 'int'), col('first', 'Needed from', 'month')],
+            lt, note='These starts should already have happened. They are made in the first month, so finished goods arrive late unless stock covers them.'))
+    return page('testing', sections, filters=filter_spec(R) + [('step', 'Step', ['Test1', 'Test2'])])
+
+
+def pullin(R, args):
+    p = R['plan']
+    rows = []
+    for sku, pr in p.products.items():
+        pulls = sum(sum(ch.levels[op]['alloc']['pullin'][:p.H]) for ch in p.chains if ch.sku == sku for op in ('Test1', 'Test2') if op in ch.ops)
+        gaps = sum(sum(ch.levels[op]['alloc']['gap'][:p.H]) for ch in p.chains if ch.sku == sku for op in ('Test1', 'Test2') if op in ch.ops)
+        cov = sum(sum(ch.levels[op]['alloc']['covered'][:p.H]) for ch in p.chains if ch.sku == sku for op in ('Test1', 'Test2') if op in ch.ops)
+        rows.append({'sku': sku, 'pull': pr['PullIn'], 'sl': pr['ServiceLevelPct'], 'max': pr['MaxPullInPct'],
+                     'cap': min(float(pr['ServiceLevelPct']), float(pr['MaxPullInPct'])) if pr['PullIn'] == 'Y' else 0,
+                     'prio': pr['Priority'], 'ss': pr['SafetyStockWeeks'], 'pulled': pulls, 'covered': cov, 'left': gaps})
+    return page('pullin', [], extra={'template': 'pullin.html', 'rows': rows, 'horizon': p.s['Pull-in horizon months']})
+
+
+# ------------------------------------------------------------------ M2 / M3
+def assembly(R, args):
+    p = R['plan']
+    rows = apply_filters(R['assembly']['rows'], args)
+    months = p.months
+    by = defaultdict(list)
+    for r in rows:
+        by[(r['sku'], r['vendor'])].append(r)
+    sections = [{'type': 'kpis', 'items': [
+        K('Die into assembly', short(sum(r['die_in'] for r in rows)), f'units, {p.H} months'),
+        K('Sorted wafers needed', short(sum(r['wafers'] for r in rows)), 'equivalent wafers'),
+        K('Assembled stock & WIP used', short(sum(s['supply'] - s['left'] for s in apply_filters(R['assembly']['supply'], args))), 'units netted'),
+    ]}]
+    series = [(f'OSAT-{v}', [sum(r['die_in'] for r in rows if r['vendor'] == v and r['month'] == m) for m in months])
+              for v in sorted({r['vendor'] for r in rows})]
+    sections.append(chart('Die into assembly by OSAT', charts.bars(months, series, title='Assembly starts')))
+    groups = []
+    for (sku, v), ls in sorted(by.items(), key=lambda kv: (kv[0][1], kv[0][0])):
+        groups.append({'title': f'{sku} · OSAT-{v}', 'sub': f'{ls[0]["die_per_wafer"]:,.0f} good die per sorted wafer', 'rows': [
+            {'label': 'Test starts to feed', 'cells': [cell(l['units_out_needed']) for l in ls]},
+            {'label': 'Assembly yield', 'cells': [(f'{l["yield"]:.1f}%', '') for l in ls]},
+            {'label': 'Die into assembly', 'cells': [cell(l['die_in'], 'strong') for l in ls], 'strong': True},
+            {'label': 'Sorted wafers (equiv.)', 'cells': [cell(l['wafers'], '', 'num1') for l in ls]},
+        ]})
+    sections.append(grid('Assembly starts', months, groups, 'Units unless stated. Test starts are after the tester plan (pull-in and catch-up).'))
+    return page('assembly', sections, filters=filter_spec(R))
+
+
+def frontend(R, args):
+    p = R['plan']
+    rows = apply_filters(R['frontend']['rows'], args)
+    months = p.months
+    fab = [r for r in R['frontend']['fab'] if not args.get('sku') or r['sku'] == args.get('sku')]
+    sections = [{'type': 'kpis', 'items': [
+        K('Wafer sort starts', short(sum(r['Sort'] or 0 for r in rows)), 'wafers at the OSATs'),
+        K('Bump starts', short(sum(r['Bump'] or 0 for r in rows)), 'wafers'),
+        K('Fab wafer starts', short(sum(r['starts'] for r in fab)), f'wafers, lots of {p.lot}'),
+        K('Fab WIP arriving', short(sum(r['wip'] for r in fab)), 'wafers in the horizon'),
+    ]}]
+    series = [(s, [sum(r['starts'] for r in fab if r['sku'] == s and r['month'] == m) for m in months]) for s in sorted({r['sku'] for r in fab})]
+    need = [sum(r['need'] for r in fab if r['month'] == m) for m in months]
+    sections.append(chart('Fab wafer starts by product', charts.bars(months, series, lines=[('Wafers needed at sort (by arrival month)', need)],
+                                                                    ref=(float(p.s['Fab capacity wafers per month']), 'Fab capacity'), title='Fab starts'),
+                          f'Starts are about {next(iter(p.fab.values()))["d_start"] if p.fab else 3} months before the wafers arrive at sort.'))
+    groups = []
+    for sku in sorted({r['sku'] for r in fab}):
+        fs = [r for r in fab if r['sku'] == sku]
+        groups.append({'title': f'{sku} · FAB', 'rows': [
+            {'label': 'Wafers needed at sort', 'cells': [cell(r['need']) for r in fs]},
+            {'label': 'Fab WIP arriving', 'cells': [cell(r['wip']) for r in fs]},
+            {'label': 'New starts arriving', 'cells': [cell(r['outs']) for r in fs]},
+            {'label': 'Wafer starts', 'cells': [cell(r['starts'], 'strong') for r in fs], 'strong': True},
+            {'label': 'Wafers late (cumulative)', 'cells': [cell(r['gap'], 'bad' if r['gap'] > 0.5 else '') for r in fs]},
+        ]})
+    by = defaultdict(list)
+    for r in rows:
+        by[(r['sku'], r['vendor'])].append(r)
+    for (sku, v), ls in sorted(by.items(), key=lambda kv: (kv[0][1], kv[0][0])):
+        rr = [{'label': 'Sort starts (wafers)', 'cells': [cell(l['Sort'], 'strong') for l in ls], 'strong': True},
+              {'label': 'Probers used', 'cells': [cell(l.get('probers'), '', 'num1') for l in ls]}]
+        if any(l['Bump'] is not None for l in ls):
+            rr.insert(0, {'label': 'Bump starts (wafers)', 'cells': [cell(l['Bump']) for l in ls]})
+        if any((l.get('sort_gap') or 0) > 0.5 for l in ls):
+            rr.append({'label': 'Sort short', 'cells': [cell(l.get('sort_gap'), 'bad') for l in ls]})
+        groups.append({'title': f'{sku} · OSAT-{v}', 'rows': rr})
+    sections.append(grid('Front end and wafer plan', months, groups, 'Wafers.'))
+    return page('frontend', sections, filters=filter_spec(R))
+
+
+def flow(R, args):
+    p = R['plan']
+    rows = apply_filters(R['flow']['rows'], args)
+    months = p.months
+    by = defaultdict(list)
+    for r in rows:
+        by[(r['sku'], r['vendor'])].append(r)
+    short_tot = sum(max([r['short'] for r in ls] + [0]) for ls in by.values())
+    sections = [{'type': 'kpis', 'items': [
+        K('Demand', short(sum(r['demand'] for r in rows)), 'units'),
+        K('Shipped on time or late', short(sum(r['ship'] for r in rows)), 'units'),
+        K('Peak shortfall', short(short_tot) if short_tot > 0.5 else 'None', 'units owed to customers', 'bad' if short_tot > 0.5 else 'ok'),
+        K('Product-OSAT chains', str(len(by)), 'supply chains planned'),
+    ]}]
+    groups = []
+    for (sku, v), ls in sorted(by.items(), key=lambda kv: (kv[0][0], kv[0][1])):
+        rr = [{'label': 'Demand', 'cells': [cell(l['demand']) for l in ls]},
+              {'label': 'Shipped', 'cells': [cell(l['ship'], 'strong') for l in ls], 'strong': True},
+              {'label': 'Short (owed)', 'cells': [cell(l['short'], 'bad' if l['short'] > 0.5 else '') for l in ls]},
+              {'label': 'Finished goods, end', 'cells': [cell(l['fg_end'], 'warn' if l['fg_end'] < l['ss'] * 0.5 and l['demand'] > 0 else '') for l in ls]},
+              {'label': 'Safety stock target', 'cells': [cell(l['ss']) for l in ls]},
+              {'label': 'Pack output', 'cells': [cell(l['pack_out']) for l in ls]}]
+        for op, lab in (('Test2', 'Test 2 starts'), ('Test1', 'Test 1 starts'), ('Assembly', 'Assembly die in'),
+                        ('Bump', 'Bump wafers'), ('Sort', 'Sort wafers')):
+            if any(l[op] is not None for l in ls):
+                rr.append({'label': lab, 'cells': [cell(l[op], '', 'num1' if op in ('Bump', 'Sort') else 'short') for l in ls]})
+        groups.append({'title': f'{sku} · OSAT-{v}', 'rows': rr})
+    sections.append(grid('Complete flow, from wafer to customer', months, groups,
+                         'Units, wafers for Bump and Sort. Read bottom-up for the build, top-down for the customer.'))
+    return page('flow', sections, filters=filter_spec(R))
+
+
+# ------------------------------------------------------------------ capacity
+def testers(R, args):
+    p = R['plan']
+    months = p.months
+    caps = [c for c in R['testing']['caps'] if (not args.get('vendor') or c['vendor'] == args['vendor'])]
+    sections = []
+    peak = max(caps, key=lambda c: c['load_util'], default=None)
+    over = [c for c in caps if c['load_util'] > 100.5]
+    sections.append({'type': 'kpis', 'items': [
+        K('Peak load', f'{peak["load_util"]:.0f}%' if peak else '–', f'OSAT-{peak["vendor"]} {peak["step"]}, {mlabel(peak["month"])}' if peak else '',
+          util_tone(peak['load_util']) if peak else ''),
+        K('Months over 100%', str(len(over)), 'tester-step-months', 'bad' if over else 'ok'),
+        K('Testers in fleet', str(sum(f['Consignee'] + f['NonConsignee'] for f in p.t['tester_fleet'])), 'consignee + non-consignee'),
+        K('Buffer target', f'{float(p.s["Capacity buffer %"]):.0f}%', 'headroom wanted (Plan settings)'),
+    ]})
+    groups = []
+    for (v, st) in sorted({(c['vendor'], c['step']) for c in caps}, key=lambda k: (TEST_OPS.index(k[1]), k[0])):
+        cs = [c for c in caps if c['vendor'] == v and c['step'] == st]
+        groups.append({'title': f'OSAT-{v} · {st}', 'rows': [
+            {'label': 'Testers available', 'cells': [(f'{c["consignee"]}+{c["non_consignee"]}', '') for c in cs]},
+            {'label': 'Testers needed', 'cells': [cell(c['needed'], '', 'num1') for c in cs]},
+            {'label': 'Load %', 'cells': [cell(c['load_util'], util_tone(c['load_util']), 'pct') for c in cs], 'strong': True},
+            {'label': 'Utilisation % (after pull-in)', 'cells': [cell(c['util'], util_tone(c['util']), 'pct') for c in cs]},
+            {'label': 'Short', 'cells': [cell(c['gap'], 'bad' if c['gap'] > 0.5 else '') for c in cs]},
+        ]})
+    sections.append(grid('Tester load by month', months, groups,
+                         'Available = consignee + non-consignee testers. Load % is before pull-in; utilisation after pull-in and catch-up.'))
+    # throughput table
+    rows = []
+    for (v, sku, st), c in sorted(p.cap.items()):
+        if (args.get('vendor') and v != args['vendor']) or sku not in p.products:
+            continue
+        upm, sec = p.upm(v, sku, st)
+        rows.append({'vendor': f'OSAT-{v}', 'sku': sku, 'step': st, 'tt': c['TestTimeSec'], 'sites': c['Sites'],
+                     'idx': c['IndexTimeSec'], 'oee': float(c['OEE']) * 100, 'sec': sec, 'uph': 3600 / sec if sec else 0, 'upm': upm,
+                     'unit': 'wafer' if st == 'Sort' else 'unit'})
+    sections.append(table('Tester throughput', [
+        col('vendor', 'OSAT'), col('sku', 'Product'), col('step', 'Step'), col('tt', 'Test time (s)', 'num1'),
+        col('sites', 'Sites', 'int'), col('idx', 'Index (s)', 'num1'), col('oee', 'OEE %', 'num0'),
+        col('sec', 'Seconds per unit', 'num2'), col('uph', 'Per hour', 'num1'), col('upm', 'Per tester-month', 'int'), col('unit', 'Unit')],
+        rows, note='Sort is per wafer: ⌈GDPW ÷ sites⌉ ÷ stepping efficiency × (test + index) + load time.'))
+    return page('testers', sections, filters=[('vendor', 'OSAT', sorted({c.vendor for c in p.chains}))])
+
+
+def hardware(R, args):
+    p = R['plan']
+    H = R['hardware']
+    rows = [r for r in H['rows'] if not args.get('vendor') or r['vendor'] == args['vendor']]
+    months = p.months
+    groups = []
+    for (v, st) in sorted({(r['vendor'], r['step']) for r in rows}, key=lambda k: (k[0], TEST_OPS.index(k[1]))):
+        rs = [r for r in rows if r['vendor'] == v and r['step'] == st]
+        groups.append({'title': f'OSAT-{v} · {st}', 'rows': [
+            {'label': 'Consignee testers (fleet)', 'cells': [cell(r['fleet_c'], '', 'int') for r in rs]},
+            {'label': 'Hardware-ready testers', 'cells': [cell(r['ready'], 'bad' if r['ready'] < r['fleet_c'] else 'ok', 'int') for r in rs], 'strong': True},
+            {'label': 'Consignee used by the plan', 'cells': [cell(r['planned_c'], 'warn' if r['planned_c'] > r['ready'] + 0.05 else '', 'num1') for r in rs]},
+        ]})
+    gaps = [r for r in rows if r['gap'] > 0]
+    sections = [{'type': 'kpis', 'items': [
+        K('Tester-months without a full kit', str(sum(r['gap'] for r in rows)), 'consignee testers × months', 'warn' if gaps else 'ok'),
+        K('Hardware limit in the plan', 'On' if p.hw_limit else 'Off', '"Limit testers to hardware-ready"', 'info'),
+        K('Deliveries due', str(sum(1 for i in H['items'] if i.get('OnOrder'))), 'hardware lines on order'),
+    ]}, grid('Hardware-ready testers', months, groups,
+             'Red: fewer full kits than consignee testers. Amber: the plan uses more consignee tester time than has hardware.')]
+    items = [dict(i, vendor=f'OSAT-{i["Vendor"]}', ready=(int(i['InService'] or 0) // max(1, int(i['PerTester'])))) for i in H['items']
+             if not args.get('vendor') or i['Vendor'] == args['vendor']]
+    sections.append(table('Hardware items', [col('vendor', 'OSAT'), col('Step', 'Step'), col('HardwareType', 'Hardware'),
+                                             col('PerTester', 'Per tester', 'int'), col('InService', 'In service', 'int'),
+                                             col('ready', 'Testers it supports', 'int'), col('OnOrder', 'On order', 'int'),
+                                             col('ArrivalMonth', 'Arrives', 'month')], items))
+    return page('hardware', sections, filters=[('vendor', 'OSAT', sorted({c.vendor for c in p.chains}))])
+
+
+def ate(R, args):
+    A = R['ate']
+    p = R['plan']
+    cases = [c for c in A['cases'] if not args.get('vendor') or c['vendor'] == args['vendor']]
+    good = [c for c in cases if c['best']['npv'] > 0]
+    sections = [{'type': 'kpis', 'items': [
+        K('Tester price', money(A['price']), 'per new consignee tester'),
+        K('Running cost', money(A['opex']), 'per tester per month'),
+        K('Positive investment cases', str(len(good)), 'NPV > 0 over ' + str(A['months']) + ' months', 'ok' if good else ''),
+        K('Short tester time in plan', short(sum(c['gap_units'] for c in cases)), 'units made late', 'warn' if any(c['gap_units'] > 0.5 for c in cases) else 'ok'),
+    ]}]
+    rows = []
+    for c in cases:
+        for s in c['scenarios']:
+            rows.append({'res': f'OSAT-{c["vendor"]} · {c["step"]}', 'testers': s['testers'], 'moved': s['units_moved'],
+                         'rec': s['gap_recovered'], 'saving': s['monthly_saving'],
+                         'payback': s['payback'] if s['payback'] and s['payback'] < 1000 else None,
+                         'npv': s['npv'], 'roi': s['roi'],
+                         'verdict': 'INVEST' if s['npv'] > 0 else ('CAPACITY' if s['gap_recovered'] > 0.5 else 'RENT'),
+                         'tone': 'ok' if s['npv'] > 0 else ('warn' if s['gap_recovered'] > 0.5 else '')})
+    sections.append(table('Buy or rent: 1 to 4 new consignee testers', [
+        col('res', 'OSAT · step'), col('testers', 'New testers', 'int'), col('moved', 'Units moved / month', 'int'),
+        col('rec', 'Shortfall recovered / month', 'int'), col('saving', 'Net saving / month', 'money'),
+        col('payback', 'Payback (months)', 'num1'), col('npv', 'NPV', 'money'), col('roi', 'ROI %', 'num0'),
+        col('verdict', 'Verdict', 'badge', tone='tone')], rows,
+        note='INVEST: positive NPV from rental savings. CAPACITY: does not pay back on savings, but would recover tester shortfalls. RENT: keep renting OSAT tester time.'))
+    groups = []
+    for c in cases:
+        groups.append({'title': f'OSAT-{c["vendor"]} · {c["step"]}', 'rows': [
+            {'label': 'Testers available', 'cells': [cell(s['have'], '', 'int') for s in c['slack']]},
+            {'label': 'Needed incl. buffer', 'cells': [cell(s['want'], '', 'num1') for s in c['slack']]},
+            {'label': 'Slack (testers)', 'cells': [(f'{s["slack"]:+.1f}', 'bad' if s['slack'] < 0 else 'ok') for s in c['slack']], 'strong': True},
+        ]})
+    sections.append(grid('Capacity slack against your buffer', p.months, groups))
+    return page('ate', sections, filters=[('vendor', 'OSAT', sorted({c.vendor for c in p.chains}))])
+
+
+def npi(R, args):
+    N = R['npi']['products']
+    p = R['plan']
+    sections = []
+    if not N:
+        sections.append(callout('No product has Status = NPI. Set a product to NPI in Products (with an NPIStartDate) to plan it here.'))
+    for n in N:
+        rows = n['steps'] + n['qual']
+        end = max([r.get('readout') or r['end'] for r in rows] + ([n['need_date']] if n['need_date'] else []))
+        marks = [(p.as_of, 'today', 'now')]
+        if n['need_date']:
+            marks.append((n['need_date'], 'customer need', 'need'))
+        sections.append({'type': 'kpis', 'items': [
+            K(f'{n["sku"]} samples ready', f'{n["samples"]:%d %b %Y}', 'first lots through every step'),
+            K('Qualification complete', f'{n["qual_done"]:%d %b %Y}', f'{len(n["qual"])} milestones', 'bad' if n['risk'] else 'ok'),
+            K('First customer demand', mlabel(n['first_demand']) if n['first_demand'] else '–', 'from the plan demand'),
+            K('Cumulative yield', f'{n["yield_cum"]:.1f}%', 'good units per gross die'),
+        ]})
+        if n['risk']:
+            late = (n['qual_done'] - n['need_date']).days
+            sections.append(callout(f'<b>Risk:</b> qualification ends {late} days after customers need {n["sku"]}. Options: start production at risk, '
+                                    f'compress the longest tests (HTOL / HTSL), or agree a later first shipment.', 'bad'))
+        sections.append(chart(f'{n["sku"]} timeline', charts.gantt(rows, n['start'] - timedelta(days=5), end + timedelta(days=10), marks),
+                              'Blue: fab. Teal: OSAT steps. Orange: qualification tests, with readouts in grey.'))
+        sections.append(table(f'{n["sku"]} plan', [col('name', 'Step / milestone'), col('start', 'Start', 'date'), col('end', 'Finish', 'date'),
+                                                   col('readout', 'Readout done', 'date')],
+                              [dict(r, readout=r.get('readout')) for r in rows], search=False))
+    return page('npi', sections)
+
+
+# ------------------------------------------------------------------ procurement
+def fab_po(R, args):
+    F = R['fab_po']
+    p = R['plan']
+    rows = [r for r in F['rows'] if not args.get('sku') or r['sku'] == args['sku']]
+    status = args.get('status')
+    if status:
+        rows = [r for r in rows if r['status'] == status]
+    sections = [{'type': 'kpis', 'items': [
+        K('PO lines', str(len(rows)), f'{sum(r["wafers"] for r in rows):,.0f} wafers'),
+        K('PO value', money(sum(r['value'] for r in rows)), 'at wafer prices'),
+        K('Past cutoff', str(sum(1 for r in rows if r['status'] == 'PAST CUTOFF')), 'confirm with the fab', 'bad'),
+        K('Order now', str(sum(1 for r in rows if r['status'] == 'ORDER NOW')), 'after the semi-cutoff', 'warn'),
+        K('Upcoming', str(sum(1 for r in rows if r['status'] == 'UPCOMING')), 'within 14 days of the semi-cutoff', 'info'),
+    ]}]
+    if F['expedite']:
+        sections.append(table('Expedite: wafers needed inside fab lead time', [col('sku', 'Product'), col('wafers', 'Wafers', 'int'),
+                                                                                col('months', 'Needed at sort in')], F['expedite'],
+                              note='New starts cannot arrive in time for these. Ask the fab to expedite WIP, or allocate the shortfall.', search=False))
+    sections.append(table('Wafer PO schedule', [
+        col('status', 'Status', 'badge', tone='tone'), col('sku', 'Product'), col('start_month', 'Wafer start', 'month'),
+        col('out_month', 'Wafers out', 'month'), col('wafers', 'Wafers', 'int'), col('lots', 'Lots', 'int'), col('price', 'Price / wafer', 'money'),
+        col('value', 'Value', 'money'), col('semi', 'Reserve by', 'date'), col('cutoff', 'Order by', 'date'),
+        col('days_to_cutoff', 'Days to cutoff', 'int'), col('ship_to', 'Ship to')], rows, tid='fabpo',
+        note=f'As of {p.as_of:%d %b %Y}. Order by = day {p.s["Fab order cutoff day"]} of the month before the start; reserve by = day {p.s["Fab semi-cutoff day"]} two months before.'))
+    sections.append(html('<div class="actions"><a class="btn ghost" href="/export/fab-po.xml">Download PO (XML)</a>'
+                         '<a class="btn ghost" href="/export/fab-forecast.xml">Download wafer forecast (XML)</a></div>'))
+    return page('fab-po', sections, filters=filter_spec(R, ('sku',)) + [('status', 'Status', ['PAST CUTOFF', 'ORDER NOW', 'UPCOMING', 'PLANNED'])])
+
+
+def osat_po(R, args):
+    O = R['osat_po']
+    p = R['plan']
+    rows = apply_filters([dict(r) for r in O['rows']], args)
+    if args.get('month'):
+        rows = [r for r in rows if r['month'] == args['month']]
+    for r in rows:
+        r['vendor_n'] = f'OSAT-{r["vendor"]}'
+    by_v = defaultdict(float)
+    for r in rows:
+        by_v[r['vendor']] += r['cost']
+    sections = [{'type': 'kpis', 'items': [K(f'OSAT-{v} spend', money(c), f'{p.H} months') for v, c in sorted(by_v.items())] +
+                 [K('Order now', str(sum(1 for r in rows if r['status'] == 'ORDER NOW')), 'lines after the semi-cutoff', 'warn')]}]
+    months = p.months
+    series = [(f'OSAT-{v}', [sum(r['cost'] for r in rows if r['vendor'] == v and r['month'] == m) for m in months]) for v in sorted(by_v)]
+    sections.append(chart('OSAT spend by month', charts.bars(months, series, unit=' USD', title='OSAT spend')))
+    sections.append(table('OSAT work orders', [
+        col('status', 'Status', 'badge', tone='tone'), col('vendor_n', 'OSAT'), col('sku', 'Product'), col('month', 'Month', 'month'),
+        col('Sort', 'Sort wafers', 'int'), col('Bump', 'Bump wafers', 'int'), col('Assembly', 'Assembly units', 'int'),
+        col('Test1', 'Test 1 insertions', 'int'), col('Test2', 'Test 2 insertions', 'int'), col('Pack', 'Pack units', 'int'),
+        col('cost', 'Cost', 'money'), col('cutoff', 'Order by', 'date')], rows, tid='osatpo'))
+    sections.append(html('<div class="actions"><a class="btn ghost" href="/export/osat-forecast.xml">Download OSAT forecast (XML)</a></div>'))
+    return page('osat-po', sections, filters=filter_spec(R) + [('month', 'Month', p.months)])
+
+
+def substrate(R, args):
+    S = R['substrate']
+    p = R['plan']
+    rows = apply_filters(S['rows'], args)
+    months = p.months
+    by = defaultdict(list)
+    for r in rows:
+        by[(r['sku'], r['vendor'])].append(r)
+    groups = []
+    for (sku, v), rs in sorted(by.items()):
+        groups.append({'title': f'{sku} · OSAT-{v} · {rs[0]["material"]}', 'rows': [
+            {'label': 'Needed for assembly', 'cells': [cell(r['need']) for r in rs]},
+            {'label': 'Used from stock', 'cells': [cell(r['used']) for r in rs]},
+            {'label': 'Short', 'cells': [cell(r['short'], 'bad' if r['severity'] in ('CRITICAL', 'HIGH') else 'warn' if r['short'] > 0.5 else '') for r in rs], 'strong': True},
+            {'label': 'Usable stock left', 'cells': [cell(r['on_hand_after']) for r in rs]},
+        ]})
+    sh = [r for r in rows if r['short'] > 0.5]
+    sections = [{'type': 'kpis', 'items': [
+        K('Months short', str(len(sh)), 'product-OSAT-months', 'bad' if sh else 'ok'),
+        K('Units short', short(sum(r['short'] for r in rows)), 'assembly blocked'),
+        K('Expiring unused', short(sum(e['units'] for e in S['expired'])), 'units written off', 'warn' if S['expired'] else 'ok'),
+        K('Consigned used', short(sum(r['consigned'] for r in rows)), 'supplied by you'),
+    ]}, grid('Material against the assembly plan', months, groups, 'Units. Batches are used first-in first-out; expired batches are skipped.')]
+    if S['expired']:
+        sections.append(table('Expiring unused', [col('sku', 'Product'), col('vendor', 'OSAT'), col('supplier', 'Supplier'),
+                                                  col('arrival', 'Arrived', 'month'), col('expiry', 'Expires', 'month'), col('units', 'Units', 'int')],
+                              S['expired'], search=False))
+    return page('substrate', sections, filters=filter_spec(R))
+
+
+def cross_flow(R, args):
+    C = R['cross']
+    p = R['plan']
+    rows = [dict(r, moved_h=sum(r['moved'][:p.H]) if r['moved'] else 0, ok='OK' if r['valid'] else 'CHECK',
+                 tone='ok' if r['valid'] else 'warn') for r in C['rows']]
+    sections = [{'type': 'kpis', 'items': [
+        K('Active rules', str(sum(1 for r in rows if r['Status'] == 'Active'))),
+        K('Units moved', short(sum(r['moved_h'] for r in rows)), f'{p.H} months'),
+        K('Logistics cost', money(sum(r['cost'] for r in rows))),
+        K('Rule problems', str(len(C['issues']) + sum(1 for r in rows if not r['valid'])), '', 'bad' if C['issues'] else 'ok'),
+    ]}]
+    if C['issues']:
+        sections.append(callout('<br>'.join(escape(i) for i in C['issues']), 'bad'))
+    sections.append(callout('Cross-flow is shown as an overlay: the quantities and cost the rules imply on the current plan. '
+                            'The tester plan does not yet move the load between OSATs.', 'info'))
+    sections.append(table('Rules and impact', [
+        col('ok', 'Check', 'badge', tone='tone'), col('SKU', 'Product'), col('AfterOperation', 'After step'), col('FromVendor', 'From'),
+        col('ToVendor', 'To'), col('Percent', '%', 'num0'), col('TransitDays', 'Transit days', 'int'), col('Status', 'Status'),
+        col('moved_h', 'Units moved', 'int'), col('cost', 'Logistics cost', 'money')], rows, search=False))
+    mx = C['matrix']
+    vs = sorted({a for a, _ in mx} | {b for _, b in mx} | set(p.vendors))
+    mrows = [dict(frm=f'OSAT-{a}', **{b: mx.get((a, b), 0) for b in vs}) for a in vs]
+    sections.append(table('Vendor-to-vendor matrix (units moved)', [col('frm', 'From \\ To')] + [col(b, f'OSAT-{b}', 'int') for b in vs],
+                          mrows, search=False))
+    return page('cross-flow', sections)
+
+
+def b2b(R, args):
+    B = R['b2b']
+    p = R['plan']
+    months = p.months
+    zones = B['zones']
+    groups = []
+    gfab = {'title': 'FAB · wafer starts', 'rows': [{'label': r['sku'], 'cells': [cell(v) for v in r['qty']]} for r in B['fab']]}
+    groups.append(gfab)
+    for sup in sorted({r['supplier'] for r in B['osat']}):
+        rs = [r for r in B['osat'] if r['supplier'] == sup and (not args.get('sku') or r['sku'] == args['sku'])]
+        groups.append({'title': sup, 'rows': [{'label': f'{r["sku"]} · {r["item"]} ({r["unit"]})', 'cells': [cell(v) for v in r['qty'][:p.H]]} for r in rs]})
+    groups.append({'title': 'Testers needed (integer)', 'rows': [{'label': f'{r["supplier"]} · {r["item"].replace(" testers needed", "")}',
+                                                                  'cells': [cell(v, '', 'int') for v in r['qty']]} for r in B['tester']]})
+    zone_row = {'title': 'Time fence', 'rows': [{'label': 'Zone', 'cells': [(z, 'z-' + z.lower()) for z in zones]}]}
+    cal = [('Working day 1-3', 'Refresh demand: customer forecasts, orders, shipment history.'),
+           ('Day 4', 'S&OP sign-off of the demand plan and allocations.'),
+           ('Day 5', 'Run Plan Yukta: tester plan, wafer plan, ATP. Save a snapshot.'),
+           ('Day 6', 'Send the fab its rolling wafer-start forecast; the frozen month is a firm PO (forecast and PO messages).'),
+           ('Day 7', 'Send each OSAT its loading forecast and work orders, with testers needed.'),
+           ('Day 10', 'Suppliers return their commits in the COMMIT rows.'),
+           ('Day 12', 'Compare COMMIT with REQUEST (GAP rows), escalate gaps, re-run the plan with the commits.'),
+           ('Daily', 'Receive WIP and shipment reports; update OSAT WIP and Fab WIP.')]
+    sections = [{'type': 'kpis', 'items': [
+        K('Frozen months', str(p.s['Frozen months']), 'firm orders'), K('Slushy months', str(p.s['Slushy months']), 'within agreed flex'),
+        K('Suppliers', str(1 + len({r['supplier'] for r in B['osat']})), 'fab + OSATs')]},
+        html('<div class="actions"><a class="btn" href="/export/b2b.xlsx">Download B2B package (.xlsx)</a>'
+             '<a class="btn ghost" href="/export/fab-forecast.xml">Fab forecast XML</a>'
+             '<a class="btn ghost" href="/export/osat-forecast.xml">OSAT forecast XML</a></div>'),
+        grid('Supplier requests by month', months, [zone_row] + groups),
+        table('Monthly B2B workflow', [col('when', 'When'), col('what', 'What happens')],
+              [{'when': a, 'what': b} for a, b in cal], search=False)]
+    return page('b2b', sections, filters=filter_spec(R, ('sku',)))
+
+
+# ------------------------------------------------------------------ analytics
+def pva(R, args):
+    P = R['pva']
+    rows = [dict(r, tone=('bad' if (r['attainment'] or 100) < 90 else 'warn' if (r['attainment'] or 100) < 97 else 'ok'),
+                 att_t=f'{r["attainment"]:.1f}%' if r['attainment'] is not None else 'no plan') for r in P['rows']]
+    if args.get('vendor'):
+        rows = [r for r in rows if r['Vendor'] == args['vendor']]
+    tot_p = sum(r['planned'] or 0 for r in rows)
+    tot_a = sum(float(r['ActualUnits']) for r in rows)
+    sections = [{'type': 'kpis', 'items': [
+        K('Attainment', f'{tot_a / tot_p * 100:.1f}%' if tot_p else '–', 'actual ÷ plan, all rows', 'ok' if tot_p and tot_a / tot_p > .97 else 'warn'),
+        K('Units missed', short(max(0, tot_p - tot_a))),
+        K('Disruptions', str(sum(1 for r in rows if r['Disruption'] != 'None')), 'rows with a reported cause'),
+    ] + [K(f'OSAT-{v["vendor"]} reliability', f'{v["score"]:.1f}', f'attain {v["attainment"]:.0f}% · OEE {v["oee"]:.0f}%') for v in P['vendors']]}]
+    months = sorted({r['Month'] for r in rows})
+    series = [(f'OSAT-{v}', [sum(float(r['ActualUnits']) for r in rows if r['Vendor'] == v and r['Month'] == m and r['Operation'] == 'Pack') for m in months])
+              for v in sorted({r['Vendor'] for r in rows})]
+    planl = [sum(r['planned'] or 0 for r in rows if r['Month'] == m and r['Operation'] == 'Pack') for m in months]
+    if months:
+        sections.append(chart('Pack output: actual by OSAT against the frozen plan', charts.bars(months, series, lines=[('Plan', planl)], title='Plan vs actual')))
+    sections.append(table('Recovery actions', [col('month', 'Month', 'month'), col('vendor', 'OSAT'), col('sku', 'Product'), col('op', 'Step'),
+                                               col('attainment', 'Attainment %', 'num1'), col('gap', 'Units missed', 'int'),
+                                               col('cause', 'Cause'), col('action', 'Recommended action')],
+                          [a for a in P['actions'] if not args.get('vendor') or a['vendor'] == args['vendor']], search=False,
+                          empty='Every row is at 95% of plan or better.'))
+    sections.append(table('Plan vs actual detail', [col('att_t', 'Attainment', 'badge', tone='tone'), col('Month', 'Month', 'month'),
+                                                    col('Vendor', 'OSAT'), col('SKU', 'Product'), col('Operation', 'Step'),
+                                                    col('planned', 'Planned', 'int'), col('ActualUnits', 'Actual', 'int'),
+                                                    col('oee', 'OEE %', 'num1'), col('AvailabilityPct', 'Avail. %', 'num1'),
+                                                    col('PerformancePct', 'Perf. %', 'num1'), col('QualityPct', 'Quality %', 'num1'),
+                                                    col('DisruptionDays', 'Disruption days', 'num1'), col('Disruption', 'Disruption')], rows))
+    return page('pva', sections, filters=[('vendor', 'OSAT', sorted({r['Vendor'] for r in P['rows']}))])
+
+
+def cost(R, args):
+    Cc = R['cost']
+    p = R['plan']
+    spend = apply_filters([dict(r) for r in Cc['spend']], args)
+    tot = sum(r['cost'] for r in spend)
+    by_proc = defaultdict(float)
+    for r in spend:
+        by_proc[r['process']] += r['cost']
+    sections = [{'type': 'kpis', 'items': [K('Total spend', money(tot), f'{p.H} months')] +
+                 [K(k, money(v), f'{v / tot * 100:.0f}% of spend' if tot else '') for k, v in sorted(by_proc.items(), key=lambda kv: -kv[1])][:5]}]
+    months = p.months
+    procs = ['Fab'] + FLOW_ORDER
+    series = [(pr, [sum(r['cost'] for r in spend if r['process'] == pr and r['month'] == m) for m in months]) for pr in procs if by_proc.get(pr)]
+    sections.append(chart('Spend by process', charts.bars(months, series, unit=' USD', title='Spend')))
+    std = [dict(r, vendor_n=('All' if r['vendor'] == '*' else f'OSAT-{r["vendor"]}')) for r in Cc['std']]
+    std = apply_filters(std, args)
+    sections.append(table('Standard cost per good unit', [col('sku', 'Product'), col('vendor_n', 'OSAT'), col('gupw', 'Good units / wafer', 'int'),
+                                                          col('Fab', 'Wafer', 'money4'), col('Sort', 'Sort', 'money4'), col('Bump', 'Bump', 'money4'),
+                                                          col('Assembly', 'Assembly', 'money4'), col('Test1', 'Test 1', 'money4'),
+                                                          col('Test2', 'Test 2', 'money4'), col('Pack', 'Pack', 'money4'),
+                                                          col('total', 'Total', 'money4')], std, search=False,
+                          note='Each step\'s price divided by the yields from that step to finished goods; test steps include retest.'))
+    agg = defaultdict(lambda: {'qty': 0.0, 'cost': 0.0})
+    for r in spend:
+        k = (r['vendor'], r['process'], r['sku'], r['unit'])
+        agg[k]['qty'] += r['qty']
+        agg[k]['cost'] += r['cost']
+    rows = [{'vendor': 'FAB' if v == 'FAB' else f'OSAT-{v}', 'process': pr, 'sku': s, 'unit': u, 'qty': d['qty'], 'cost': d['cost'],
+             'rate': d['cost'] / d['qty'] if d['qty'] else 0} for (v, pr, s, u), d in sorted(agg.items())]
+    sections.append(table('Spend by supplier, process and product', [col('vendor', 'Supplier'), col('process', 'Process'), col('sku', 'Product'),
+                                                                     col('qty', 'Quantity', 'int'), col('unit', 'Unit'), col('rate', 'Avg. price', 'money4'),
+                                                                     col('cost', 'Spend', 'money')], rows))
+    return page('cost', sections, filters=filter_spec(R))
+
+
+def pnl(R, args):
+    P = R['pnl']
+    p = R['plan']
+    try:
+        yl = max(-50.0, min(100.0, float(args.get('yield_loss') or 0)))
+    except ValueError:
+        yl = 0.0
+    rows = [dict(r, cogs=r['cogs'] * (1 + yl / 100)) for r in P['rows']]
+    rows = [r for r in rows if not args.get('sku') or r['sku'] == args['sku']]
+    if args.get('customer'):
+        rows = [r for r in rows if r['customer'] == args['customer']]
+    for r in rows:
+        r['gm'] = r['revenue'] - r['cogs']
+        r['gmp'] = r['gm'] / r['revenue'] * 100 if r['revenue'] else 0
+    rev = sum(r['revenue'] for r in rows)
+    cg = sum(r['cogs'] for r in rows)
+    lost = [l for l in P['lost'] if not args.get('sku') or l['sku'] == args['sku']]
+    sections = [{'type': 'kpis', 'items': [
+        K('Revenue', money(rev), f'{p.H} months, planned shipments'), K('COGS', money(cg), f'standard cost{f" +{yl:.0f}% yield loss" if yl else ""}'),
+        K('Gross margin', money(rev - cg), f'{(rev - cg) / rev * 100:.1f}%' if rev else '', 'ok' if rev - cg > 0 else 'bad'),
+        K('Revenue lost to shortfalls', money(sum(l['revenue'] for l in lost)) if lost else 'None', 'supply short of demand', 'bad' if lost else 'ok'),
+    ]}]
+    sections.append(html(f'<form class="inline-form" method="get"><input type="hidden" name="sku" value="{escape(args.get("sku") or "")}">'
+                         f'<label>Yield-loss sensitivity <input type="number" name="yield_loss" value="{yl:g}" step="1" min="-50" max="100"> %</label>'
+                         f'<button class="btn ghost" type="submit">Apply</button></form>'))
+    months = p.months
+    series = [(s, [sum(r['gm'] for r in rows if r['sku'] == s and r['month'] == m) for m in months]) for s in sorted({r['sku'] for r in rows})]
+    sections.append(chart('Gross margin by product', charts.bars(months, [(n, [max(0, v) for v in vs]) for n, vs in series], unit=' USD',
+                                                                 lines=[('Revenue', [sum(r['revenue'] for r in rows if r['month'] == m) for m in months])],
+                                                                 title='Gross margin')))
+
+    def agg(key):
+        d = defaultdict(lambda: {'units': 0.0, 'revenue': 0.0, 'cogs': 0.0})
+        for r in rows:
+            x = d[r[key]]
+            x['units'] += r['units']
+            x['revenue'] += r['revenue']
+            x['cogs'] += r['cogs']
+        out = []
+        for k, x in sorted(d.items(), key=lambda kv: -(kv[1]['revenue'] - kv[1]['cogs'])):
+            gm = x['revenue'] - x['cogs']
+            out.append(dict(name=k, units=x['units'], revenue=x['revenue'], cogs=x['cogs'], gm=gm,
+                            gmp=gm / x['revenue'] * 100 if x['revenue'] else 0, flag='LOSS' if gm < 0 else 'OK', tone='bad' if gm < 0 else 'ok',
+                            asp=x['revenue'] / x['units'] if x['units'] else 0, unit_cost=x['cogs'] / x['units'] if x['units'] else 0))
+        return out
+    c = [col('flag', '', 'badge', tone='tone'), col('name', 'Name'), col('units', 'Units', 'int'), col('asp', 'ASP', 'money4'),
+         col('unit_cost', 'Unit cost', 'money4'), col('revenue', 'Revenue', 'money'), col('cogs', 'COGS', 'money'), col('gm', 'Gross margin', 'money'),
+         col('gmp', 'GM %', 'num1')]
+    sections.append(cols2(table('By product', c, agg('sku'), search=False), table('By customer', c, agg('customer'), search=False)))
+    if lost:
+        sections.append(table('Revenue lost to supply shortfalls', [col('sku', 'Product'), col('units', 'Units short', 'int'),
+                                                                     col('revenue', 'Revenue', 'money'), col('margin', 'Margin', 'money')], lost, search=False))
+    return page('pnl', sections, filters=filter_spec(R, ('sku',)) + [('customer', 'Customer', sorted({r['customer'] for r in P['rows']}))])
+
+
+def snapshots(R, args, ws):
+    p = R['plan']
+    snaps = ws.get('snapshots', [])
+    from .cockpit import plan_snapshot_data
+    cur = plan_snapshot_data(R)
+    sel = args.get('snap')
+    s = next((x for x in snaps if x['id'] == sel), snaps[-1] if snaps else None)
+    rows = []
+    if s:
+        old = s['data']
+        keys = sorted(set(cur) | set(old))
+        for k in keys:
+            sku, m = k.split('|')
+            a, b = old.get(k, {}), cur.get(k, {})
+            for metric, label in (('demand', 'Demand'), ('Test1', 'Test 1 starts'), ('wafer_starts', 'Wafer starts'), ('ship', 'Shipped'), ('short', 'Short')):
+                va, vb = a.get(metric, 0) or 0, b.get(metric, 0) or 0
+                if abs(vb - va) > 0.5:
+                    rows.append({'sku': sku, 'month': m, 'metric': label, 'snap': va, 'now': vb, 'delta': vb - va,
+                                 'pct': (vb - va) / va * 100 if va else None, 'tone': 'up' if vb > va else 'down'})
+    return page('snapshots', [], extra={'template': 'snapshots.html', 'snaps': snaps, 'sel': s, 'rows': rows})

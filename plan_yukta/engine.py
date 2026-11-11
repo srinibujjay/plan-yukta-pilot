@@ -1,13 +1,10 @@
 """
-Plan Yukta pilot engine.
+Lot-level WIP audit engine.
 
-A standalone port of the planning/visibility calculations in the Plan Yukta
-Django dashboard (dashboard/data_processor.py, osat_transfer_dedup.py,
-wip_regression.py). It works on plain DataFrames read from the pilot Excel
-template, with no database, email, OneDrive or Yielddb dependencies.
-
-Each calculation names the dashboard function it mirrors, so behaviour can be
-checked against the production code.
+Works on plain DataFrames read from the audit Excel template (foundry WIP, foundry
+shipments, daily OSAT WIP snapshots), with no database or external connections:
+product mapping, fab WIP, OSAT WIP by operation, de-duplication, binning, E&O,
+gross-die capacity check and lot lead times. See CALCULATIONS.md, part A.
 """
 from __future__ import annotations
 

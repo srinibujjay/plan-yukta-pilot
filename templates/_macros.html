@@ -1,0 +1,106 @@
+{% macro tone_of(v) -%}
+{%- set s = (v|string)|lower -%}
+{%- if s in ('high', 'error', 'bad', 'past cutoff', 'critical', 'loss', 'not allowed', 'not available', 'check') -%}bad
+{%- elif s in ('medium', 'warning', 'warn', 'order now', 'partial', 'later date', 'capacity') -%}warn
+{%- elif s in ('low', 'info', 'upcoming', 'outside horizon') -%}info
+{%- elif s in ('ok', 'planned', 'available', 'invest', 'reserved') -%}ok
+{%- else -%}{%- endif -%}
+{%- endmacro %}
+
+{% macro kpis(items) %}
+<div class="kpis">
+  {% for k in items %}<div class="kpi {{ k.tone }}"><div class="label">{{ k.label }}</div><div class="value" title="{{ k.value }}">{{ k.value }}</div><div class="sub">{{ k.sub }}</div></div>{% endfor %}
+</div>
+{% endmacro %}
+
+{% macro table(s) %}
+<section class="panel">
+  <div class="panel-head"><h2>{{ s.title }}</h2>{% if s.rows and s.search and s.rows|length > 8 %}<div class="table-tools"><input type="search" placeholder="Filter rows…" data-filter="{{ s.id }}" aria-label="Filter {{ s.title }}"></div>{% endif %}</div>
+  {% if s.note %}<p class="sub">{{ s.note }}</p>{% endif %}
+  {% if s.rows %}
+  <div class="tablewrap{{ ' tall' if s.rows|length > 25 }}"><table id="t-{{ s.id }}" class="sortable-table">
+    <thead><tr>{% for c in s.cols %}<th class="sortable {{ c.align }}" data-col="{{ loop.index0 }}">{{ c.label }}</th>{% endfor %}</tr></thead>
+    <tbody>
+    {% for r in (s.rows[:s.limit] if s.limit else s.rows) %}<tr>
+      {% for c in s.cols %}{% set v = r[c.key] %}
+        {% if c.fmt == 'badge' %}<td><span class="badge {{ r[c.tone] if c.tone and r[c.tone] in ('ok','warn','bad','info') else tone_of(r[c.tone] if c.tone else v) }}">{{ v }}</span></td>
+        {% elif c.fmt == 'link' %}<td>{% if r.link %}<a href="{{ r.link }}">{{ v }}</a>{% else %}{{ v }}{% endif %}</td>
+        {% else %}<td class="{{ c.align }}{{ ' wrap' if c.key in ('text', 'action', 'message', 'what', 'HoldReason') }}" data-v="{{ v if v is not none else '' }}">{{ v|fmt(c.fmt) }}</td>{% endif %}
+      {% endfor %}
+    </tr>{% endfor %}
+    </tbody>
+  </table></div>
+  {% if s.limit and s.rows|length > s.limit %}<p class="more">Showing {{ s.limit }} of {{ s.rows|length }} rows. Download the plan workbook for all of them.</p>{% endif %}
+  {% else %}<p class="muted small">{{ s.empty }}</p>{% endif %}
+</section>
+{% endmacro %}
+
+{% macro grid(s) %}
+<section class="panel">
+  <h2>{{ s.title }}</h2>
+  {% if s.note %}<p class="sub">{{ s.note }}</p>{% endif %}
+  <div class="tablewrap tall"><table class="mgrid">
+    <thead><tr><th></th>{% for m in s.months %}<th class="r">{{ m }}</th>{% endfor %}</tr></thead>
+    <tbody>
+    {% for g in s.groups %}
+      {% if g.title %}<tr class="ghead"><td colspan="{{ s.months|length + 1 }}">{{ g.title }}{% if g.sub %}<span class="gsub">{{ g.sub }}</span>{% endif %}</td></tr>{% endif %}
+      {% for r in g.rows %}<tr class="{{ 'strong' if r.strong }}"><td>{% if r.href %}<a class="rowlink" href="{{ r.href }}">{{ r.label }}</a>{% else %}{{ r.label }}{% endif %}</td>
+        {% for t, tone in r.cells %}<td class="{{ tone }}">{{ t }}</td>{% endfor %}</tr>{% endfor %}
+    {% endfor %}
+    </tbody>
+  </table></div>
+</section>
+{% endmacro %}
+
+{% macro chart(s) %}
+<section class="panel"><h2>{{ s.title }}</h2>{% if s.note %}<p class="sub">{{ s.note }}</p>{% endif %}{{ s.html|safe }}</section>
+{% endmacro %}
+
+{% macro render(s) %}
+  {% if s.type == 'kpis' %}{{ kpis(s['items']) }}
+  {% elif s.type == 'table' %}{{ table(s) }}
+  {% elif s.type == 'grid' %}{{ grid(s) }}
+  {% elif s.type == 'chart' %}{{ chart(s) }}
+  {% elif s.type == 'html' %}{{ s.html|safe }}
+  {% elif s.type == 'cols' %}<div class="cols">{% for x in s['items'] %}<div>{{ render(x) }}</div>{% endfor %}</div>
+  {% endif %}
+{% endmacro %}
+
+{% macro filters(spec, args) %}
+{% if spec %}
+<form class="filters" method="get">
+  {% for name, label, opts in spec %}
+  <label>{{ label }}<select name="{{ name }}" onchange="this.form.submit()"><option value="">All</option>
+    {% for o in opts %}<option value="{{ o }}" {{ 'selected' if args.get(name) == o|string }}>{{ ('OSAT-' ~ o) if name == 'vendor' else (mlabel(o) if name == 'month' else o) }}</option>{% endfor %}</select></label>
+  {% endfor %}
+  {% if args.get('sku') or args.get('vendor') or args.get('step') or args.get('status') or args.get('month') or args.get('customer') %}<a class="btn ghost sm" href="?">Clear filters</a>{% endif %}
+  <noscript><button class="btn ghost" type="submit">Apply</button></noscript>
+</form>
+{% endif %}
+{% endmacro %}
+
+{% macro about(info, key, ws, open=False) %}
+{% if info and (info.what or info.how or info.tables) %}
+<details class="about" {{ 'open' if open }}>
+  <summary>How this module works{% if info.tryit %} · things to try{% endif %}</summary>
+  <div class="about-body">
+    <div>
+      {% if info.what %}<p>{{ info.what }}</p>{% endif %}
+      {% if info.how %}<h4>Calculation</h4><ul>{% for h in info.how %}<li>{{ h }}</li>{% endfor %}</ul>{% endif %}
+    </div>
+    <div>
+      {% if info.tryit %}<h4>Try this</h4><ul>{% for t in info.tryit %}<li>{{ t }}</li>{% endfor %}</ul>{% endif %}
+      {% if info.tables %}<h4 style="margin-top:12px">Data it uses (click to view or edit)</h4>
+      <div class="datachips">{% for t in info.tables %}<a href="/data/{{ t }}" class="{{ 'edited' if ws and t in (ws.edited or []) }}">{{ tables_meta[t].title }}</a>{% endfor %}</div>{% endif %}
+    </div>
+  </div>
+</details>
+{% endif %}
+{% endmacro %}
+
+{% macro head(page, num=None, actions=None) %}
+<div class="page-head">
+  <div>{% if num %}<span class="tagnum">{{ num }}</span>{% endif %}<h1>{{ page.title }}</h1><p class="lead">{{ page.summary }}</p></div>
+  {% if actions %}<div class="actions">{{ actions|safe }}</div>{% endif %}
+</div>
+{% endmacro %}

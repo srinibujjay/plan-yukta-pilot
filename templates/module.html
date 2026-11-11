@@ -1,0 +1,18 @@
+{% extends 'base.html' %}
+{% from '_macros.html' import render, filters, about, head with context %}
+{% block body %}
+{{ head(page) }}
+{% if key == 'home' %}
+<div class="tourstrip"><b>New here?</b><span class="muted small">Synthetic demo data: edit any table and the whole plan recalculates.</span>
+  <div class="steps-inline">{% for k, t, txt in tour %}<a href="{{ '/' if k == 'home' else ('/data' if k == 'data' else '/m/' ~ k) }}" title="{{ txt }}"><i>{{ loop.index }}</i>{{ t }}</a>{% endfor %}</div>
+  <a class="btn sm" href="/m/tour">Take the 10-minute tour</a></div>
+{% endif %}
+{{ about(page.info, key, ws) }}
+{{ filters(page.filters, args) }}
+{% for s in page.sections %}{{ render(s) }}{% endfor %}
+{% if next_key %}
+<div class="actions" style="justify-content:flex-end;margin-top:4px">
+  {% set nk = next_key %}<a class="btn ghost" href="{{ '/data' if nk == 'data' else ('/audit' if nk == 'audit' else '/m/' ~ nk) }}">Next: {{ nav_label(nk) }} →</a>
+</div>
+{% endif %}
+{% endblock %}

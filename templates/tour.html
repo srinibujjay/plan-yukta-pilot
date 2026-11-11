@@ -1,0 +1,23 @@
+{% extends 'base.html' %}
+{% from '_macros.html' import head with context %}
+{% block body %}
+{{ head(page) }}
+<div class="callout info">Plan Yukta plans a fabless semiconductor supply chain backwards from customer demand: finished goods → pack → final test (with tester capacity) → assembly → bump → wafer sort → fab wafer starts, at every OSAT. Every module below reads the same data tables, so a change anywhere flows everywhere.</div>
+<ol class="tour">
+  {% for k, t, txt in tour %}<li><b>{{ t }}</b><p>{{ txt }}</p><a class="btn ghost sm" href="{{ '/' if k == 'home' else ('/data' if k == 'data' else '/m/' ~ k) }}">Open {{ nav_label(k) }} →</a></li>{% endfor %}
+</ol>
+<section class="panel" style="margin-top:16px">
+  <h2>How the modules connect</h2>
+  <p class="sub">Read left to right for the planning flow; each step's output is the next step's requirement.</p>
+  <div class="tablewrap"><table><thead><tr><th>Module</th><th>Takes</th><th>Gives</th></tr></thead><tbody>
+    <tr><td>Demand &amp; Forecast</td><td>Customer forecast, orders, shipment history</td><td>Plan demand per product and month</td></tr>
+    <tr><td>M1 Testing Starts</td><td>Plan demand, finished goods and test WIP, tester fleet and test times</td><td>Test starts the testers can do, pull-in, shortfalls</td></tr>
+    <tr><td>M2 Assembly Starts</td><td>Test starts, assembly yield, assembly WIP</td><td>Die into assembly and sorted wafers needed</td></tr>
+    <tr><td>M3 Front End &amp; Wafers</td><td>Wafers needed, bump/sort WIP, prober fleet, fab WIP</td><td>Bump and sort starts, fab wafer starts</td></tr>
+    <tr><td>M4 Complete Flow</td><td>All of the above</td><td>Shipments, shortages and finished goods by product and OSAT</td></tr>
+    <tr><td>M5 Available to Promise</td><td>Finished goods plan by bin, reservations, shippable matrix</td><td>Promise dates for new orders</td></tr>
+    <tr><td>FAB / OSAT PO, B2B</td><td>Wafer starts and OSAT quantities</td><td>Purchase orders, rolling forecasts, commit sheets</td></tr>
+    <tr><td>Cost, P&amp;L</td><td>Quantities, prices, yields</td><td>Spend, standard cost, revenue and margin</td></tr>
+  </tbody></table></div>
+</section>
+{% endblock %}

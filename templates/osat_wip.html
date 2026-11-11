@@ -1,0 +1,50 @@
+{% extends 'base.html' %}
+{% from '_macros.html' import head, about, tone_of with context %}
+{% block body %}
+{{ head(page) }}
+{{ about(page.info, key, ws) }}
+<div class="kpis">
+  {% for v, d in W.by_vendor.items()|sort %}<div class="kpi {{ 'warn' if d.hold }}"><div class="label">OSAT-{{ v }}</div><div class="value">{{ d.lots }} lots</div>
+    <div class="sub">{{ d.units|short }} units · {{ d.wafers|short }} wafers · {{ d.hold }} on hold</div></div>{% endfor %}
+  <div class="kpi {{ 'bad' if W.unmapped else 'ok' }}"><div class="label">Unmapped lots</div><div class="value">{{ W.unmapped|length }}</div><div class="sub">left out of the plan</div></div>
+</div>
+{% set ops = ['Sort', 'Bump', 'DieBank', 'Assembly', 'Test1', 'Test2', 'Pack', 'FG'] %}
+<section class="panel">
+  <h2>WIP by product and step (all OSATs, mapped lots)</h2>
+  <p class="sub">Sort, Bump and Die bank in wafers; Assembly onwards in units. Includes lots on hold.</p>
+  <div class="tablewrap"><table class="mgrid"><thead><tr><th>Product</th>{% for o in ops %}<th class="r">{{ o }}</th>{% endfor %}</tr></thead>
+    <tbody>{% for s in W.matrix.keys()|map(attribute=0)|unique|sort %}<tr><td>{{ s }}</td>{% for o in ops %}<td>{{ W.matrix.get((s, o), 0)|short }}</td>{% endfor %}</tr>{% endfor %}</tbody></table></div>
+</section>
+{% if W.unmapped %}
+<section class="panel">
+  <h2>Lots that could not be mapped</h2>
+  <p class="sub">Add the vendor's code to <a href="/data/product_codes">Vendor product codes</a> or <a href="/data/operation_codes">Vendor operation names</a> and these lots join the plan.</p>
+  <div class="tablewrap"><table><thead><tr><th>OSAT</th><th>Lot</th><th>Vendor product</th><th>Vendor operation</th><th class="r">Units</th><th>Problem</th></tr></thead>
+  <tbody>{% for l in W.unmapped %}<tr><td>OSAT-{{ l.Vendor }}</td><td class="mono">{{ l.LotID }}</td><td class="mono">{{ l.VendorProduct }}</td><td>{{ l.VendorOperation }}</td>
+    <td class="r mono">{{ (l.Units or l.Wafers)|fmt('int') }}</td><td><span class="badge bad">{{ l.issue }}</span></td></tr>{% endfor %}</tbody></table></div>
+</section>
+{% endif %}
+<section class="panel" id="holds">
+  <h2>Lots on hold</h2>
+  <p class="sub">{{ 'Held lots count as supply (Plan settings).' if R.plan.count_hold else 'Held lots are not counted as supply. Release one and the plan uses it immediately.' }}</p>
+  {% if W.holds %}
+  <div class="tablewrap"><table><thead><tr><th>OSAT</th><th>Lot</th><th>Product</th><th>Step</th><th class="r">Units</th><th class="r">Wafers</th><th>Reason</th><th></th></tr></thead>
+  <tbody>{% for l in W.holds %}<tr><td>OSAT-{{ l.Vendor }}</td><td class="mono">{{ l.LotID }}</td><td>{{ l.SKU or l.VendorProduct }}</td><td>{{ l.Operation or l.VendorOperation }}</td>
+    <td class="r mono">{{ l.Units|fmt('int') }}</td><td class="r mono">{{ l.Wafers|fmt('int') }}</td><td class="wrap">{{ l.HoldReason }}</td>
+    <td><form method="post" action="/osat-wip/hold"><input type="hidden" name="vendor" value="{{ l.Vendor }}"><input type="hidden" name="lot" value="{{ l.LotID }}">
+      <input type="hidden" name="action" value="release"><button class="btn sm" type="submit">Release</button></form></td></tr>{% endfor %}</tbody></table></div>
+  {% else %}<p class="muted">No lots on hold.</p>{% endif %}
+</section>
+<section class="panel">
+  <div class="panel-head"><h2>All lots</h2><div class="table-tools"><input type="search" placeholder="Filter lots…" data-filter="lots"><a class="btn ghost sm" href="/data/osat_wip">Edit table</a></div></div>
+  <p class="sub">Vendor codes on the left, how Plan Yukta reads them on the right.</p>
+  <div class="tablewrap tall"><table id="t-lots" class="sortable-table"><thead><tr>
+    <th class="sortable" data-col="0">OSAT</th><th class="sortable" data-col="1">Lot</th><th class="sortable" data-col="2">Vendor product</th><th class="sortable" data-col="3">Vendor operation</th>
+    <th class="sortable" data-col="4">→ Product</th><th class="sortable" data-col="5">→ Step</th><th class="sortable" data-col="6">State</th>
+    <th class="sortable r" data-col="7">Wafers</th><th class="sortable r" data-col="8">Units</th><th class="sortable" data-col="9">Bin</th><th class="sortable" data-col="10">Date code</th><th></th></tr></thead>
+  <tbody>{% for l in W.lots %}<tr><td>OSAT-{{ l.Vendor }}</td><td class="mono">{{ l.LotID }}</td><td class="mono small">{{ l.VendorProduct }}</td><td class="small">{{ l.VendorOperation }}</td>
+    <td>{{ l.SKU or '' }}</td><td>{{ l.Operation or '' }}</td><td><span class="badge {{ 'warn' if l.State == 'HOLD' else 'ok' if l.State == 'DONE' else '' }}">{{ l.State }}</span></td>
+    <td class="r" data-v="{{ l.Wafers or 0 }}">{{ l.Wafers|fmt('int') }}</td><td class="r" data-v="{{ l.Units or 0 }}">{{ l.Units|fmt('int') }}</td><td>{{ l.Bin or '' }}</td><td class="mono small">{{ l.DateCode or '' }}</td>
+    <td>{% if l.State != 'HOLD' %}<form method="post" action="/osat-wip/hold"><input type="hidden" name="vendor" value="{{ l.Vendor }}"><input type="hidden" name="lot" value="{{ l.LotID }}"><input type="hidden" name="action" value="hold"><button class="btn ghost sm" type="submit" title="Put on hold">Hold</button></form>{% endif %}</td></tr>{% endfor %}</tbody></table></div>
+</section>
+{% endblock %}

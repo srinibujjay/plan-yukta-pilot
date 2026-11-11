@@ -1,29 +1,58 @@
-# Plan Yukta — pilot
+# Plan Yukta pilot
 
-Plan Yukta is a web app and Excel template for fabless semiconductor supply chain teams. It runs five modules together:
+A planning cockpit for fabless semiconductor supply chains. All modules sit in a sidebar, every module reads the same data tables, and visitors can edit any table in the browser. Save a change and the whole plan recalculates.
 
-1. **Material now.** Fab and OSAT WIP with duplicate rows removed, E&O, a capacity check and lot lead times.
-2. **Demand forecast.** A statistical forecast blended with customer forecasts, with accuracy and bias.
-3. **Module-level supply plan.** MRP netting through fab, bump, sort, assembly and final test.
-4. **Tester (ATE) capacity.** Tester hours needed against hours available, by month.
-5. **Monthly B2B package.** Rolling FAB and OSAT forecasts with time fences and a commit sheet.
+The demo data is synthetic: products (ORION, VEGA, LYRA, ATLAS, NOVA), vendors (OSAT-A/B/C), customers, lots and prices are invented.
 
-[CALCULATIONS.md](CALCULATIONS.md) sets out every formula. The same text appears in the app under **How it calculates**.
+## Modules
 
-## What's in this folder
+| Group | Module | What it does |
+|---|---|---|
+| | Cockpit | KPIs, plan flow for any month, tester load heatmap, alerts |
+| Planning | Demand & Forecast | Customer forecast, orders, Holt statistical forecast, build strategy per product |
+| | M1 · Testing Starts | Final-test starts per OSAT, tester allocation (consignee first), pull-in, catch-up |
+| | Pull-in & Service Level | Per-product pull-in switch, service level, cash cap, priority, safety stock |
+| | M2 · Assembly Starts | Die into assembly and sorted wafers, netted against WIP |
+| | M3 · Front End & Wafers | Bump and sort starts, prober capacity, fab WIP netting, wafer starts in lots |
+| | M4 · Complete Flow | Every product × OSAT × month from wafer start to customer shipment |
+| | M5 · Available to Promise | Order check by bin and MOQ, reservations, cumulative ATP |
+| Capacity & engineering | Tester Capacity | Load and utilisation by OSAT, step and month; throughput per product |
+| | Hardware Readiness | Sockets, load boards, probe cards against the consignee fleet |
+| | ATE Economics | Buy or rent: payback, NPV and ROI for 1–4 new testers, capacity slack |
+| | NPI Management | Engineering lot timeline, qualification Gantt, risk against first demand |
+| Procurement & B2B | FAB PO Schedule | Wafer POs with cutoff and reservation dates, expedite list, XML |
+| | OSAT PO Schedule | Monthly work orders and cost per OSAT, XML |
+| | Substrate & Lead Frame | FIFO with expiry against the assembly plan |
+| | Cross Flow | Inter-OSAT moves, cost and rule checks (overlay) |
+| | Monthly B2B Package | Time-fenced supplier forecasts, REQUEST / COMMIT / GAP workbook |
+| Analytics & monitoring | Plan vs Actual | Attainment, OEE, reliability score, recovery actions |
+| | Snapshot Comparison | Save the plan, change data, see what moved |
+| | Cost Planning | Spend by supplier and process; standard cost roll-up through yields |
+| | Profit & Loss | Revenue, COGS and margin by product and customer; lost revenue |
+| | OSAT WIP Snapshot | Vendor codes mapped to SKUs and steps; holds you can release |
+| | Lot-level WIP Audit | Upload raw fab and OSAT reports to de-duplicate rows and measure lead times |
+| Data & setup | Data Tables | 26 editable tables, CSV/Excel upload and download per table |
+| | SKU Setup Wizard | Clone a product into every table in one step |
+| | Data Checks | Problems that change or stop the plan |
+| | Import / Export | Whole workspace as one Excel workbook, up and down |
+
+Every formula is in [CALCULATIONS.md](CALCULATIONS.md), also shown in the app under **How It Calculates**.
+
+## Code
 
 | Path | What it is |
 |---|---|
-| `app.py` | Flask app. Download the template, upload a workbook, see the results, download them as .xlsx. |
-| `plan_yukta/engine.py` | Material-now calculations. Works on plain DataFrames, with no database. |
-| `plan_yukta/planning.py` | Forecast, module-level supply plan, tester capacity and the B2B package. |
-| `plan_yukta/osat_transfer_dedup.py` | The dashboard's OSAT de-duplication rules, copied unchanged. |
-| `plan_yukta/template.py` | Builds the Excel template. Its Summary sheet is live formulas. |
-| `sample/make_sample.py` | Generates the synthetic sample data (invented products and lots). |
-| `static/PlanYukta_Template.xlsx` | Blank template for pilot testers, with one example row per sheet. |
-| `static/PlanYukta_Sample.xlsx` | Filled sample workbook covering six weeks of daily OSAT snapshots. |
-| `build_files.py` | Rebuilds both workbooks. Recalculate them in Excel or LibreOffice afterwards so the Summary shows values. |
-| `render.yaml` | One-click Render deployment. |
+| `app.py` | Flask routes: pages, data editing, uploads, ATP, snapshots, exports, chat, access codes |
+| `plan_yukta/workspace.py` | Table catalogue, validation, per-visitor workspace storage, Excel import/export |
+| `plan_yukta/demo_data.py` | The synthetic demo dataset |
+| `plan_yukta/cockpit.py` | Planning engine: backward pass, tester allocation, fab, FG, and every module's results |
+| `plan_yukta/views.py` | Page builders (KPIs, charts, month grids, tables) |
+| `plan_yukta/charts.py` | Server-rendered SVG charts |
+| `plan_yukta/modules.py` | Sidebar, module descriptions, demo tour |
+| `plan_yukta/exports.py` | B2B workbook, XML messages, full plan workbook |
+| `plan_yukta/assistant.py` | "Ask Plan Yukta" chat (help search, or Claude if `ANTHROPIC_API_KEY` is set) |
+| `plan_yukta/engine.py`, `osat_transfer_dedup.py`, `audit_view.py` | Lot-level WIP audit |
+| `templates/`, `static/` | Pages, styles (dark and light), scripts, audit template and sample |
 
 ## Run locally
 
@@ -32,46 +61,8 @@ pip install -r requirements.txt
 python app.py            # http://127.0.0.1:5000
 ```
 
-## Deploy on Render (about US$7 a month)
+## Deploy on Render
 
-1. Create a new GitHub repository, e.g. `plan-yukta-pilot`, and put the contents of this folder at its root.
-2. In Render, choose **New → Blueprint** and select that repository. Render reads `render.yaml` and creates one web service on the **free** instance type, on the free Hobby workspace plan.
-   - The free instance sleeps after 15 minutes without visitors and takes about a minute to wake.
-   - When testers start using it regularly, switch to the always-on `0.5c-512mb` instance (US$7 a month) in the service's settings.
-3. In the service's **Environment** tab, set `PILOT_ACCESS` to your invited testers (see below). `SECRET_KEY` is generated by Render. Optionally set `FEEDBACK_URL` to a feedback form; a "Give feedback" link then appears in the header.
-4. Every push to the default branch redeploys the app. Health checks hit `/healthz`.
+`render.yaml` is a Blueprint. Every push to `main` redeploys. Set `PILOT_ACCESS` to `name:code` pairs for invited testers (empty = open). Optional: `FEEDBACK_URL`, `ANTHROPIC_API_KEY`.
 
-The free instance gives 750 hours a month and is enough for a small closed pilot. Paid instances are billed by the second while they run.
-
-### Inviting testers
-
-The site is closed whenever `PILOT_ACCESS` is set. Each tester gets their own code:
-
-```
-PILOT_ACCESS=ravi:K7q2Lm9p,anita:P9xwT3rb,john:Q4ne8Vz2
-```
-
-- Send each person the site URL and **only their own code**.
-- To remove someone, delete their pair and save. Render restarts the service, and that person is signed out on their next click.
-- Render's **Logs** tab shows who signed in and ran plans (`PILOT login tester=...`, `PILOT run tester=...`). No uploaded data is logged.
-- Leave `PILOT_ACCESS` empty only when running locally.
-
-### Chat assistant
-
-Every page has an **Ask Plan Yukta** button.
-
-- **Without an API key**, it answers by searching the built-in help: the guide, the formulas and the upload format.
-- **With an AI key**, it becomes an AI assistant that also explains the results on the tester's screen. Create a key at console.anthropic.com and set it as `ANTHROPIC_API_KEY` in Render's Environment tab.
-- The key is billed per question. Each tester is limited to `CHAT_LIMIT_PER_HOUR` questions an hour (30 by default).
-
-### Sizing
-
-Tested with a 13.5 MB workbook holding about 57,000 OSAT rows (468 daily snapshots). It used about 160 MB of memory and took about 25 seconds on one full CPU. The 0.5 CPU instance will be slower, so the gunicorn timeout is 120 s.
-
-For much larger histories, either upload fewer snapshots (four to eight weeks is enough for de-duplication and lead times), or move to the `1c-2g` instance at US$25 a month.
-
-## Privacy
-
-Uploads are read in memory, processed, and returned in the same response. Nothing is written to disk or kept between requests.
-
-The results workbook is embedded in the results page as a download link, so the server holds no copy of it either.
+Workspaces are small JSON files in `/tmp` (one per browser session, deleted after 24 hours). On Render's free instance they also disappear when the service restarts; testers keep their work by downloading the workspace from Import / Export.

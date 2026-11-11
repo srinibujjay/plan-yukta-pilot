@@ -1,6 +1,5 @@
 {% extends 'base.html' %}
-{% block title %}Plan Yukta · results{% include '_planning.html' %}
-{% endblock %}
+{% block title %}Audit results · Plan Yukta{% endblock %}
 
 {% macro table(t, wrap_col=-1, empty='Nothing to show.') -%}
   {% if t.rows %}
@@ -28,16 +27,16 @@
 {% block body %}
 <div class="actions" style="justify-content:space-between; margin-bottom:6px">
   <div>
-    <h1 style="margin:0">Plan results</h1>
+    <span class="tagnum">Lot-level WIP audit</span><h1 style="margin:0">Audit results</h1>
     <p class="muted small" style="margin:4px 0 0">
       {{ source_name }} · as of {{ res.settings.as_of }} · latest OSAT snapshot {{ res.latest_snapshot.strftime('%Y-%m-%d %H:%M') }}
       · {{ res.snapshot_count }} snapshot{{ 's' if res.snapshot_count != 1 }} used
     </p>
   </div>
   <div class="actions">
-    <a class="btn" download="PlanYukta_Results.xlsx"
+    <a class="btn" download="PlanYukta_Audit_Results.xlsx"
        href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{{ xlsx_b64 }}">Download results (.xlsx)</a>
-    <a class="btn ghost" href="{{ url_for('index') }}">Run another</a>
+    <a class="btn ghost" href="{{ url_for('audit_index') }}">Run another</a>
   </div>
 </div>
 {% if is_sample %}<div class="notice" style="margin-top:14px">This is the <b>synthetic sample</b>: invented products and lots, built so every check has something to find.</div>{% endif %}
@@ -46,12 +45,9 @@
   <span class="mono">{{ res.unmapped_partnames|join(', ') }}</span>. Add them to Name_Map, or check that their mother lots appear in the fab files.</div>
 {% endif %}
 
-<nav class="subnav">
-  <a href="#now">Material now</a>{% if plan %}<a href="#forecast">Forecast</a><a href="#supply">Supply plan</a><a href="#testers">Testers</a><a href="#b2b">B2B package</a>{% endif %}
-</nav>
 <div class="kpis" style="margin-top:18px" id="now">
   {% for label, value, hint in kpis %}
-  <div class="kpi"><div class="label">{{ label }}</div><div class="value">{{ value }}</div><div class="hint">{{ hint }}</div></div>
+  <div class="kpi"><div class="label">{{ label }}</div><div class="value">{{ value }}</div><div class="sub">{{ hint }}</div></div>
   {% endfor %}
 </div>
 
@@ -62,7 +58,7 @@
   <details><summary>Fab WIP by stage</summary>{{ table(fab_stage) }}</details>
 </section>
 
-<div class="grid2">
+<div class="cols">
   <section class="panel">
     <h2>Capacity check</h2>
     <p class="sub">Active WIP in dies against wafers shipped × gross die per wafer × {{ res.settings.capacity_tolerance }}. Over capacity means something is double counted or a shipment is missing.</p>
@@ -103,7 +99,7 @@
   <details><summary>Lead time table</summary>{{ table(lead) }}</details>
 </section>
 
-<div class="grid2">
+<div class="cols">
   <section class="panel">
     <h2>Excess &amp; obsolete</h2>
     <p class="sub">Date code older than {{ res.settings.eo_age_months|int }} months, or bin above {{ res.settings.bin_baseline }}.</p>
@@ -116,5 +112,4 @@
     {{ table(binning) }}
   </section>
 </div>
-{% include '_planning.html' %}
 {% endblock %}

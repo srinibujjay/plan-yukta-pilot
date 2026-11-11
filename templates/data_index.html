@@ -1,0 +1,17 @@
+{% extends 'base.html' %}
+{% from '_macros.html' import head with context %}
+{% block body %}
+{{ head(page) }}
+<div class="callout info">Every module reads these tables. Open a table to edit it in the browser, add or delete rows, or upload your own CSV / Excel for it.
+  Save, and the whole plan recalculates. Your changes stay in your own workspace{% if edited %}; <b>{{ edited|length }}</b> table{{ 's' if edited|length != 1 }} edited so far{% endif %}.
+  <a href="/m/io">Import or export everything at once →</a></div>
+{% for g, items in groups %}
+<h2 style="margin:18px 0 10px">{{ g }}</h2>
+<div class="cards">
+  {% for k, m, n in items %}
+  <a class="card" href="/data/{{ k }}"><b>{{ m.title }}</b><p>{{ m.about }}</p>
+    <div class="meta"><span>{{ n }} row{{ 's' if n != 1 }}</span><span>Used by {{ m.used_by|join(', ') }}</span>{% if k in edited %}<span class="ed">edited</span>{% endif %}</div></a>
+  {% endfor %}
+</div>
+{% endfor %}
+{% endblock %}

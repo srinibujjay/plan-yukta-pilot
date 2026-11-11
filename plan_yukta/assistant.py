@@ -23,62 +23,77 @@ API_VERSION = '2023-06-01'
 
 FAQ = [
     ('What Plan Yukta does',
-     'Plan Yukta runs a fabless planning cycle in five modules: (1) Material now: WIP across fab and OSAT with '
-     'double-counted rows removed, E&O, capacity check and lot lead times; (2) Demand forecast; (3) Module-level '
-     'supply plan; (4) Tester (ATE) capacity; (5) Monthly B2B package for FAB and OSAT. Upload one workbook made '
-     'from the template and all five run together.'),
-    ('How the plan works backwards (reverse flow)',
-     'The plan starts from customer demand and works backwards through the manufacturing modules. '
-     '1) Finished goods: projected stock = last month + receipts from current WIP - demand. If it falls below the '
-     'safety stock target (weeks of supply x weekly demand), the gap is a planned receipt. '
-     '2) Final test and assembly: to receive N good units, N / (assembly yield x final test yield) good die must '
-     'enter assembly, (assembly + final test weeks) earlier. '
-     '3) Die bank: those die come from sorted good die in stock first. '
-     '4) Wafer sort, bump and fab: any remaining die need new wafers = die / (GDW x fab line yield x sort yield), '
-     'rounded up to whole lots, started (fab + bump + sort weeks) before assembly. A start that would fall before '
-     'the first plan month is flagged "inside lead time". '
-     '5) Testers: the final-test and sort loads from this plan, plus the WIP already in the line, are converted to '
-     'tester hours using test time, sites and index time, and compared with testers x hours x OEE. '
-     '6) B2B: the fab wafer starts and OSAT module loads become the rolling forecasts sent to suppliers, with '
-     'frozen, slushy and liquid time fences.'),
+     'Plan Yukta is a planning cockpit for fabless semiconductor supply chains. It plans backwards from customer demand '
+     'through finished goods, pack, final test (with tester capacity), assembly, bump, wafer sort and fab wafer starts at '
+     'every OSAT, then turns the plan into ATP promises, FAB and OSAT purchase orders, the monthly B2B package, cost and P&L. '
+     'Every module reads the same data tables, and the visitor can edit any table on its Data page.'),
+    ('Using your own data',
+     'Open Data Tables in the sidebar to edit any table in the browser, or upload a CSV / Excel for one table. '
+     'Import / Export downloads the whole workspace as one workbook; replace the demo rows with your own data and upload it. '
+     'If any row has a problem nothing is changed and the error says which row and column. Reset to demo data undoes everything.'),
+    ('How the plan works backwards',
+     '1) Demand: the build strategy per product gives plan demand. 2) Finished goods needed = demand + safety stock build - '
+     'finished goods on hand. 3) Pack, Test2 and Test1 starts = good units needed / yield, netted against WIP at each step. '
+     '4) Test starts are capacity-checked against the tester fleet at each OSAT, with pull-in and catch-up. 5) Assembly die = '
+     'test starts the testers can do / assembly yield. 6) Wafers = die / (GDPW x sort yield x bump yield). 7) Fab outs net fab '
+     'WIP; the rest become wafer starts, a fab cycle time earlier, rounded up to lots. Each step is offset by its cycle time.'),
+    ('Why an OSAT is short of testers',
+     'Testing Starts and Tester Capacity show load % (what the plan asks) against testers available (consignee + non-consignee, '
+     'after fleet changes). Above 100% the testers cannot make the plan in that month. Plan Yukta then builds ahead with idle '
+     'testers in earlier months (pull-in), within the pull-in horizon and the product service level, and makes the rest late '
+     '(catch-up). Fixes: add a fleet change, raise OEE, cut test time (more sites), allow non-consignee testers, or move volume '
+     'to another OSAT by changing vendor shares.'),
+    ('Pull-in and service level',
+     'Pull-in uses idle tester time in earlier months to build ahead for a later shortfall. The share of the shortfall that may '
+     'be built early is min(service level %, max pull-in %) per product. It never goes further back than the pull-in horizon, or '
+     'earlier than material can be built (the fab start lead time). Edit it on Pull-in & Service Level.'),
     ("Holt's method",
-     "Holt is not a typo. Holt's linear trend method (Charles C. Holt, 1957) is a standard exponential smoothing "
-     'forecast that tracks a level and a trend. Alpha weights the latest level and beta the latest trend; higher '
-     'values react faster to recent months. Plan Yukta reports WMAPE (forecast error as a share of actuals) and '
-     'bias (positive = forecast runs high) over the last six months.'),
-    ('Module-level planning',
-     '"Module" means each manufacturing step a fabless product passes through: fab, bump, wafer sort, assembly and '
-     'final test. Each module has its own yield, cycle time and usually its own supplier. The supply plan gives the '
-     'monthly load on each module so you can agree capacity with each supplier.'),
-    ('Tester capacity planning',
-     'Final test seconds per unit = (test time + index time) / sites. Wafer sort seconds per wafer = '
-     'ceil(GDW / sites) / stepping efficiency x (test time + index time) + wafer load time. Hours needed = quantity '
-     'x seconds / 3600. Hours available = testers x hours per week x 4.33 x OEE. Above 85% is tight, above 100% '
-     'overloaded; the plan also shows how many testers would be needed. Fixes: add testers, raise OEE, cut test '
-     'time (more sites, shorter program), or move load to another month.'),
+     "Holt is not a typo. Holt's linear trend method (Charles C. Holt, 1957) is a standard exponential smoothing forecast that "
+     'tracks a level and a trend. Alpha weights the latest level and beta the latest trend. WMAPE and bias are measured on '
+     'one-step forecasts over the last six months of shipment history.'),
+    ('Tester capacity formula',
+     'Final test seconds per unit = (test time + index time) / sites. Sort seconds per wafer = ceil(GDPW / sites) / stepping '
+     'efficiency x (test time + index) + wafer load time. Units per tester-month = hours per day x 3600 x OEE x working days / '
+     'seconds per unit. Testers needed = load / units per tester-month.'),
     ('Monthly B2B workflow',
-     'Working day 1-3 refresh demand; day 4 S&OP sign-off; day 5 run supply and tester plans; day 6 send the fab '
-     'rolling wafer-start forecast (frozen month is a firm order); day 7 send the OSAT loading forecast and work '
-     'orders; day 10 suppliers return commits; day 12 compare commits with requests and escalate gaps. Daily: '
-     'receive WIP and shipment notices. The B2B package download has REQUEST, COMMIT and GAP rows.'),
-    ('Inside lead time and shortage alerts',
-     'Inside lead time means the plan would have needed a start before the first plan month, so only stock or WIP '
-     'can cover that month: expedite, allocate or pull from the die bank. Shortage means projected finished goods '
-     'go negative.'),
+     'Day 1-3 refresh demand; day 4 S&OP sign-off; day 5 run the plan and save a snapshot; day 6 send the fab its rolling '
+     'wafer-start forecast (frozen month = firm PO); day 7 send OSAT loading forecasts and work orders; day 10 suppliers return '
+     'commits; day 12 compare COMMIT with REQUEST and escalate gaps. The B2B package download has REQUEST, COMMIT and GAP rows.'),
+    ('Available to promise',
+     'ATP = cumulative (finished goods on hand by bin + planned pack output x bin split) - cumulative reservations, taking the '
+     'minimum from the month onwards. The order check applies the shippable matrix (customer accepted bins and MOQ), splits across '
+     'OSATs and proposes later ship dates when needed. Reserve adds lines to the Reservations table.'),
+    ('Inside lead time',
+     'A requirement that should already have started before the plan start month (or a fab start before month 0) cannot be met '
+     'by new starts. Plan Yukta makes it in the first month and flags it; customers are short only if stock and safety stock '
+     'cannot cover the delay. FAB PO lists such wafers under Expedite.'),
     ('Privacy and access',
-     'Uploads are processed in memory and not stored. Each tester signs in with their own access code; the pilot '
-     'owner adds or removes codes in the hosting settings.'),
+     'Each tester signs in with their own access code. Each browser session gets its own workspace, kept on the server for 24 '
+     'hours and never shown to anyone else. The demo data is synthetic.'),
 ]
 
 
 def _sections():
+    from . import modules
     out = [(t, b) for t, b in FAQ]
+    for key, info in modules.INFO.items():
+        body = ' '.join(x for x in [info.get('summary', ''), info.get('what', '')] if x)
+        if info.get('how'):
+            body += ' Calculation: ' + ' '.join(info['how'])
+        if info.get('tryit'):
+            body += ' Try: ' + ' '.join(info['tryit'])
+        if body.strip():
+            out.append((info.get('title', key), body))
     calc = (HERE / 'CALCULATIONS.md').read_text(encoding='utf-8')
     for block in re.split(r'\n(?=## )', calc):
         title = block.strip().splitlines()[0].lstrip('#').strip() if block.strip() else ''
         if title:
             out.append((title, block.strip()))
-    out.append(('Upload format', format_spec.as_text()))
+    from .workspace import TABLES
+    for k, m in TABLES.items():
+        out.append((f'Data table: {m["title"]}', m['about'] + ' Columns: ' + ', '.join(
+            f'{c["name"]}{" (" + c["help"] + ")" if c["help"] else ""}' for c in m['columns'])))
+    out.append(('Lot-level audit upload format', format_spec.as_text()))
     return out
 
 
@@ -111,10 +126,10 @@ def ai_enabled() -> bool:
 
 def _system_prompt(context: str) -> str:
     kb = '\n\n'.join(f'### {t}\n{b}' for t, b in SECTIONS)
-    ctx = f'\n\nCURRENT RESULTS ON THE TESTER\'S SCREEN (summary):\n{context}' if context else ''
-    return ('You are "Ask Plan Yukta", the help assistant inside the Plan Yukta pilot, a planning tool for fabless '
-            'semiconductor supply chains. Answer questions about how to use the tool, what to upload, how each '
-            'number is calculated, and what the tester\'s current results mean. Use only the reference below and '
+    ctx = f'\n\nCURRENT PLAN AND PAGE (summary):\n{context}' if context else ''
+    return ('You are "Ask Plan Yukta", the help assistant inside the Plan Yukta pilot, a planning cockpit for fabless '
+            'semiconductor supply chains with modules in a sidebar and editable data tables. Answer questions about how to use '
+            'the tool, how each number is calculated, what the current plan shows and which data table to change. Use only the reference below and '
             'the results summary; if something is not covered, say so plainly and suggest where to look in the app. '
             'Never invent figures. Keep answers short: a few sentences or a short list, plain language, and name '
             'the page or section to look at. Decline unrelated requests politely.\n\nREFERENCE\n' + kb + ctx)
@@ -148,8 +163,8 @@ def ask(question: str, context: str = '', history: list | None = None) -> dict:
             pass   # fall back to help search below
     hits = search(question)
     if not hits:
-        return {'answer': "I couldn't find that in the help. Try the pages \"What it does\", \"Upload format\" or "
-                          '"How it calculates", or ask about uploads, the forecast, the supply plan, testers or the B2B package.',
+        return {'answer': "I couldn't find that in the help. Try the Demo Tour or How It Calculates, or ask about a module: "
+                          'testing starts, pull-in, tester capacity, ATP, POs, the B2B package, cost or P&L.',
                 'mode': 'help'}
     parts = []
     for title, body in hits:

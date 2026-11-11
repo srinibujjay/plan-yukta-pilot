@@ -1,0 +1,54 @@
+{% extends 'base.html' %}
+{% from '_macros.html' import head with context %}
+{% block body %}
+{{ head(page) }}
+{% if error %}<div class="callout bad"><b>That didn't run.</b> {{ error }}</div>{% endif %}
+<div class="callout info">This audit works on raw supplier reports (lot by lot), separately from the planning modules. Use it to check that your OSAT daily WIP reports are not double counting material before you trust them as plan supply.</div>
+<div class="cols">
+  <section class="panel">
+    <h2>1 · Get the workbook</h2>
+    <p class="sub">Six sheets: Settings, Products, Name_Map, Fab_WIP, Fab_Shipments and OSAT_WIP (one or more daily snapshots stacked).</p>
+    <div class="actions">
+      <a class="btn" href="{{ url_for('download', name='template') }}">Download template</a>
+      <a class="btn ghost" href="{{ url_for('download', name='sample') }}">Download sample</a>
+      <a href="{{ url_for('upload_format') }}">Column-by-column format →</a>
+    </div>
+  </section>
+  <section class="panel">
+    <h2>2 · Run the audit</h2>
+    <form method="post" action="{{ url_for('audit_run') }}" enctype="multipart/form-data">
+      <div class="drop"><input type="file" name="workbook" accept=".xlsx,.xlsm" required aria-label="Audit workbook"></div>
+      <button class="btn" type="submit">Run audit</button>
+    </form>
+    <form method="post" action="{{ url_for('audit_run') }}" style="margin-top:12px">
+      <input type="hidden" name="sample" value="1"><span class="muted small">No data handy?</span>
+      <button class="btn ghost" type="submit">Run the synthetic sample</button>
+    </form>
+  </section>
+</div>
+<section class="panel">
+  <h2>Play with the sample</h2>
+  <p class="sub">Change the audit settings and re-run the synthetic sample.</p>
+  <form method="post" action="{{ url_for('audit_run') }}" class="play">
+    <input type="hidden" name="sample" value="1">
+    <label>As-of date<input type="date" name="as_of" value="2026-11-06"></label>
+    <label>E&amp;O age (months)<input type="number" name="eo_age_months" value="24" min="1" max="120" step="1"></label>
+    <label>E&amp;O bin baseline<select name="bin_baseline"><option>BIN1</option><option>BIN2</option><option>BIN3</option></select></label>
+    <label>Capacity tolerance<input type="number" name="capacity_tolerance" value="1.05" min="0.5" max="2" step="0.05"></label>
+    <div class="actions" style="grid-column: 1 / -1"><button class="btn" type="submit">Re-run sample</button></div>
+  </form>
+</section>
+<section class="panel">
+  <h2>What it checks</h2>
+  <ul class="calc-list">
+    <li><b>Fab WIP and shipments</b>Wafers at the foundry by product and stage, and wafers shipped.</li>
+    <li><b>Late fab lots</b>Lots projected out after their committed date.</li>
+    <li><b>OSAT WIP by operation</b>Sort and Bump in wafers; Assembly, Test and Packing in dies.</li>
+    <li><b>Duplicate removal</b>Five rules for transfer, finished and stale rows, each removed row explained.</li>
+    <li><b>Ambiguous part names</b>Generic OSAT names assigned to a product through fab lot numbers.</li>
+    <li><b>Excess &amp; obsolete</b>Old date codes and downgraded bins.</li>
+    <li><b>Capacity check</b>Active WIP compared with wafers shipped × gross die per wafer.</li>
+    <li><b>Lot lead time</b>Process and wait days per stage for every mother lot.</li>
+  </ul>
+</section>
+{% endblock %}

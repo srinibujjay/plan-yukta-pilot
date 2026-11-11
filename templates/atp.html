@@ -1,0 +1,64 @@
+{% extends 'base.html' %}
+{% from '_macros.html' import head, about, tone_of with context %}
+{% block body %}
+{{ head(page) }}
+{{ about(page.info, key, ws) }}
+<form method="post" action="/atp/check">
+<section class="panel">
+  <h2>Order lines</h2>
+  <p class="sub">Up to five lines. Quantities in units; the requested date (CRD) must fall in the plan horizon.</p>
+  <div class="tablewrap"><table class="orderlines">
+    <thead><tr><th>#</th><th>Customer</th><th>Product</th><th>Bin</th><th class="r">Quantity</th><th>Requested date</th><th>Customer PO</th></tr></thead>
+    <tbody>
+    {% for i in range(1, 6) %}
+    <tr><td class="muted">{{ i }}</td>
+      <td><select name="customer{{ i }}">{% for c in customers %}<option {{ 'selected' if (i == 2 and c == 'Customer Gamma') }}>{{ c }}</option>{% endfor %}</select></td>
+      <td><select name="sku{{ i }}"><option value="">–</option>{% for s in skus %}<option {{ 'selected' if (i == 1 and s == 'ORION') or (i == 2 and s == 'LYRA') }}>{{ s }}</option>{% endfor %}</select></td>
+      <td><select name="bin{{ i }}">{% for b in bins %}<option {{ 'selected' if (i == 2 and b == 'BIN_2') }}>{{ b }}</option>{% endfor %}</select></td>
+      <td><input name="qty{{ i }}" inputmode="numeric" value="{{ '2,500,000' if i == 1 else ('40,000' if i == 2 else '') }}" style="text-align:right" aria-label="Quantity line {{ i }}"></td>
+      <td><input type="date" name="crd{{ i }}" value="{{ default_crd if i <= 2 else '' }}" aria-label="Requested date line {{ i }}"></td>
+      <td><input name="po{{ i }}" value="{{ 'CPO-DEMO-' ~ i if i <= 2 else '' }}" aria-label="Customer PO line {{ i }}"></td></tr>
+    {% endfor %}
+    </tbody></table></div>
+  <div class="actions" style="margin-top:12px"><button class="btn" type="submit" name="do" value="check">Check availability</button>
+    <button class="btn ghost" type="submit" name="do" value="reserve" onclick="return confirm('Reserve these lines? They will be added to Reservations.')">Check &amp; reserve</button></div>
+</section>
+</form>
+
+{% if atp_result %}
+<section class="panel" id="result">
+  <h2>Result</h2>
+  <div class="tablewrap"><table>
+    <thead><tr><th>Status</th><th>Order</th><th class="r">Quantity</th><th>Promised from</th><th>Notes</th></tr></thead>
+    <tbody>{% for r in atp_result %}<tr>
+      <td><span class="badge {{ tone_of(r.status) }}">{{ r.status }}</span></td>
+      <td>{{ r.line.customer }} · {{ r.line.sku }} {{ r.line.bin }} · CRD {{ r.line.crd }}</td>
+      <td class="r mono">{{ r.qty|fmt('int') }}</td>
+      <td>{% for a in r.allocations %}<div class="mono small">OSAT-{{ a.vendor }}: {{ a.qty|fmt('int') }} · ship {{ a.ssd }}</div>{% else %}–{% endfor %}</td>
+      <td class="small">{{ r.messages|join(' ') }}</td></tr>{% endfor %}</tbody>
+  </table></div>
+  <p class="sub" style="margin-top:10px">Nothing is reserved yet. Use "Check &amp; reserve" to book it.</p>
+</section>
+{% endif %}
+
+<section class="panel">
+  <h2>Available to promise by product, OSAT and bin</h2>
+  <p class="sub">Cumulative units that can still be promised by the end of each month, after reservations.</p>
+  <div class="tablewrap tall"><table class="mgrid">
+    <thead><tr><th>Product · OSAT · bin</th><th class="r">On hand</th><th class="r">Reserved</th>{% for m in months %}<th class="r">{{ mlabel(m) }}</th>{% endfor %}</tr></thead>
+    <tbody>{% for r in atp_summary %}<tr><td>{{ r.sku }} · OSAT-{{ r.vendor }} · {{ r.bin }}</td><td>{{ r.onhand|short }}</td><td>{{ r.reserved|short }}</td>
+      {% for a in r.atp %}<td class="{{ 'bad' if a < 1 }}">{{ a|short }}</td>{% endfor %}</tr>{% endfor %}</tbody>
+  </table></div>
+</section>
+
+<section class="panel" id="reservations">
+  <div class="panel-head"><h2>Reservations</h2><a class="btn ghost sm" href="/data/reservations">Edit table</a></div>
+  <div class="tablewrap tall"><table class="sortable-table" id="t-res">
+    <thead><tr><th>Sales order</th><th>Customer</th><th>PO</th><th>Product</th><th>OSAT</th><th>Bin</th><th class="r">Qty</th><th>CRD</th><th>Ship date</th><th>Status</th><th></th></tr></thead>
+    <tbody>{% for r in reservations|reverse %}<tr><td class="mono">{{ r.SalesOrder }}</td><td>{{ r.Customer }}</td><td class="small">{{ r.CustomerPO or '' }}</td><td>{{ r.SKU }}</td>
+      <td>OSAT-{{ r.Vendor }}</td><td>{{ r.Bin }}</td><td class="r mono">{{ r.Qty|fmt('int') }}</td><td>{{ r.CRD }}</td><td>{{ r.SSD }}</td>
+      <td><span class="badge {{ tone_of(r.Status) }}">{{ r.Status }}</span></td>
+      <td>{% if r.Status == 'Reserved' %}<form method="post" action="/atp/cancel"><input type="hidden" name="so" value="{{ r.SalesOrder }}"><button class="btn danger sm" type="submit">Cancel</button></form>{% endif %}</td></tr>{% endfor %}</tbody>
+  </table></div>
+</section>
+{% endblock %}
