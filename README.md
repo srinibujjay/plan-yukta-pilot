@@ -11,12 +11,13 @@ The demo data is synthetic: products (ORION, VEGA, LYRA, ATLAS, NOVA), vendors (
 | | Cockpit | KPIs, plan flow for any month, tester load heatmap, alerts |
 | Planning | Demand & Forecast | Customer forecast, orders, Holt statistical forecast, build strategy per product |
 | | M1 · Testing Starts | Final-test starts per OSAT, tester allocation (consignee first), pull-in, catch-up |
-| | Pull-in & Service Level | Per-product pull-in switch, service level, cash cap, priority, safety stock |
+| | Pull-in & Service Level | Per-product pull-in caps, plus the build-ahead production plan and stock by process |
 | | M2 · Assembly Starts | Die into assembly and sorted wafers, netted against WIP |
 | | M3 · Front End & Wafers | Bump and sort starts, prober capacity, fab WIP netting, wafer starts in lots |
 | | M4 · Complete Flow | Every product × OSAT × month from wafer start to customer shipment |
 | | M5 · Available to Promise | Order check by bin and MOQ, reservations, cumulative ATP |
-| Capacity & engineering | Tester Capacity | Load and utilisation by OSAT, step and month; throughput per product |
+| Capacity & engineering | Tester & Capacity Overrides | Future tester arrivals, hardware deliveries, test-time / sites / OEE and yield changes by month; plan with vs without them |
+| | Tester Capacity | Load and utilisation by OSAT, step and month; throughput per product |
 | | Hardware Readiness | Sockets, load boards, probe cards against the consignee fleet |
 | | ATE Economics | Buy or rent: payback, NPV and ROI for 1–4 new testers, capacity slack |
 | | NPI Management | Engineering lot timeline, qualification Gantt, risk against first demand |
@@ -31,7 +32,7 @@ The demo data is synthetic: products (ORION, VEGA, LYRA, ATLAS, NOVA), vendors (
 | | Profit & Loss | Revenue, COGS and margin by product and customer; lost revenue |
 | | OSAT WIP Snapshot | Vendor codes mapped to SKUs and steps; holds you can release |
 | | Lot-level WIP Audit | Upload raw fab and OSAT reports to de-duplicate rows and measure lead times |
-| Data & setup | Data Tables | 26 editable tables, CSV/Excel upload and download per table |
+| Data & setup | Data Tables | 28 editable tables, CSV/Excel upload and download per table |
 | | SKU Setup Wizard | Clone a product into every table in one step |
 | | Data Checks | Problems that change or stop the plan |
 | | Import / Export | Whole workspace as one Excel workbook, up and down |

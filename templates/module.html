@@ -2,6 +2,7 @@
 {% from '_macros.html' import render, filters, about, head with context %}
 {% block body %}
 {{ head(page) }}
+{% if key in ['testing', 'testers', 'hardware', 'ate'] %}<div class="actions"><a class="btn" href="/m/overrides">+ Add a future tester, hardware or test-time change</a><span class="muted small">Overrides are {{ 'on' if R.plan.apply else 'OFF (baseline plan)' }}.</span></div>{% endif %}
 {% if key == 'home' %}
 <div class="tourstrip"><b>New here?</b><span class="muted small">Synthetic demo data: edit any table and the whole plan recalculates.</span>
   <div class="steps-inline">{% for k, t, txt in tour %}<a href="{{ '/' if k == 'home' else ('/data' if k == 'data' else '/m/' ~ k) }}" title="{{ txt }}"><i>{{ loop.index }}</i>{{ t }}</a>{% endfor %}</div>

@@ -34,6 +34,7 @@ ICONS = {
     'gear': 'M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6zM19 12l2-1-1-3-2 .3-1.5-1.5L17 4l-3-1-1 2h-2l-1-2-3 1 .5 2.8L6 8.3 4 8l-1 3 2 1v0l-2 1 1 3 2-.3 1.5 1.5L7 20l3 1 1-2h2l1 2 3-1-.5-2.8 1.5-1.5 2 .3 1-3z',
     'help': 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM9.5 9a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6V14M12 17v.5',
     'tour': 'M5 3v18M5 4h11l-2 4 2 4H5',
+    'override': 'M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0M14 4v4M8 10v4M16 16v4',
 }
 
 # key, group, short label, icon, title
@@ -46,6 +47,7 @@ NAV = [
     ('frontend', 'Planning modules', 'M3 · Front End & Wafers', 'wafer'),
     ('flow', 'Planning modules', 'M4 · Complete Flow', 'flow'),
     ('atp', 'Planning modules', 'M5 · Available to Promise', 'atp'),
+    ('overrides', 'Capacity & engineering', 'Tester & Capacity Overrides', 'override'),
     ('testers', 'Capacity & engineering', 'Tester Capacity', 'gauge'),
     ('hardware', 'Capacity & engineering', 'Hardware Readiness', 'tool'),
     ('ate', 'Capacity & engineering', 'ATE Economics', 'econ'),
@@ -153,6 +155,20 @@ INFO = {
         tables=['reservations', 'customer_bins', 'bin_splits', 'osat_wip'],
         tryit=['Check 2,500,000 ORION BIN_1 for Customer Alpha on the 20th of the plan start month: it is split across OSATs and part ships later.',
                'Try LYRA BIN_3 for Customer Gamma: the shippable matrix does not allow it.']),
+    'overrides': dict(
+        title='Tester & Capacity Overrides',
+        summary='What happens when a new tester or hardware arrives on a future date: capacity, pull-in and the whole plan, with and without your overrides.',
+        what='Enter future changes in one place: testers arriving or leaving at an OSAT, hardware deliveries (sockets, load boards, probe and instrument cards), a new test program or multi-site handler (test time, sites, index, OEE), and yield changes, each from the month it takes effect. Plan Yukta re-plans tester capacity month by month, decides how much to build ahead with idle testers before a crunch (pull-in), and passes the result through assembly, wafers, POs, ATP and P&L. The baseline plan (all overrides off) is shown alongside so you can see what each change is worth.',
+        how=['Testers available in a month = fleet + every tester change dated on or before it (consignee and non-consignee separately).',
+             'Hardware-ready consignee testers = min over hardware types of ⌊(in service + arrivals so far) ÷ per tester⌋; it caps consignee testers when "Limit consignee testers to full kits" is on.',
+             'Units per tester-month in a month use the latest test time, sites, index time and OEE dated on or before it.',
+             'Yield changes replace the process-flow yield and retest rate from their month.',
+             'The baseline is the same plan with all four override tables ignored. "Overrides off" makes every module show the baseline.'],
+        tables=['fleet_changes', 'hardware_arrivals', 'capacity_overrides', 'yield_overrides', 'tester_fleet', 'hardware', 'tester_capacity'],
+        tryit=['Delete the "+2 C" tester arrival at OSAT-A Test1 in July 2027: the crunch no longer clears and customers go short.',
+               'Add 1 consignee tester at OSAT-A Test1 from March 2027 and watch pull-in fall and load drop below 100%.',
+               'Switch on "Limit consignee testers to full kits": OSAT-A Test1 runs one tester short until the instrument cards arrive in February.',
+               'Click "Overrides off (baseline)" and open the Cockpit: this is the plan if none of the future changes happen.']),
     'testers': dict(
         title='Tester Capacity',
         summary='Tester utilisation by OSAT, step and month, testers needed against testers available, and the throughput behind it.',
@@ -313,6 +329,7 @@ TOUR = [
     ('home', 'Start at the cockpit', 'The cockpit runs the full plan on the demo data: five products, three OSATs, one foundry. Read the alerts: a tester crunch at OSAT-A in spring, wafers inside fab lead time, a substrate shortage, and an NPI product whose qualification ends after customers want it.'),
     ('demand', 'See what the plan builds to', 'Each product has a build strategy. ATLAS (end of life) builds to booked orders only; ORION and VEGA to the larger of forecast and orders; LYRA blends the customer and statistical forecasts. The chart shows 12 months of history and the plan.'),
     ('testing', 'Find the tester crunch', 'OSAT-A Test1 is overloaded in May and June (load above 100%) and tight around them. Plan Yukta builds ahead with idle testers in March and April (pull-in) and makes the rest in July, when two new testers arrive (catch-up). The grid shows each product\'s testers, pull-in and shortfall by month.'),
+    ('overrides', 'Plan a future tester or hardware arrival', 'This is where future capacity goes in. The demo already has two new testers arriving at OSAT-A in July 2027, a faster ORION test program from May, hardware deliveries and an OEE plan. Without them customers would be about 2.8M units short; with them, none. Add or delete an override and see capacity, pull-in and shortfall change by month.'),
     ('data', 'Change the data and break the plan', 'Open Tester fleet, change OSAT-A Test1 Consignee from 6 to 4, and save. Go back to the cockpit: now customers are short, P&L loses revenue and ATE Economics shows the shortfall a new tester would recover. Use "Reset to demo" on the table to undo.'),
     ('osat-wip', 'Release a held lot', 'Three lots are on hold. Release the ORION lot at OSAT-B and its units count as supply again.'),
     ('atp', 'Promise an order', 'Check 2,500,000 ORION BIN_1 for Customer Alpha on the 20th of the first month. It splits across the three OSATs and part ships the next month. Reserve it, then check again: there is less to promise.'),

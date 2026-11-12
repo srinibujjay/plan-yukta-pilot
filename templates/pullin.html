@@ -1,5 +1,5 @@
 {% extends 'base.html' %}
-{% from '_macros.html' import head, about with context %}
+{% from '_macros.html' import head, about, render, filters with context %}
 {% block body %}
 {{ head(page) }}
 {{ about(page.info, key, ws, open=True) }}
@@ -27,4 +27,8 @@
   <div class="actions" style="margin-top:12px"><button class="btn" type="submit">Save &amp; re-plan</button><a class="btn ghost" href="/m/testing">See the effect in Testing Starts</a></div>
 </section>
 </form>
+<h2 style="margin:22px 0 10px">Pull-in production plan</h2>
+{{ filters(page.filters, args) }}
+{% for s in page.sections %}{{ render(s) }}{% endfor %}
+<div class="actions"><a class="btn ghost" href="/m/overrides">Change future capacity on Tester &amp; Capacity Overrides →</a></div>
 {% endblock %}

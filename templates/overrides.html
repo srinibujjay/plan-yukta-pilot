@@ -1,0 +1,147 @@
+{% extends 'base.html' %}
+{% from '_macros.html' import head, about, kpis, grid with context %}
+{% block body %}
+{% set f = page.forms %}
+{{ head(page) }}
+<div class="callout info">Enter what changes in the future: testers arriving or leaving, hardware deliveries, a faster test program, more sites, better OEE or a yield change, each from the month it takes effect.
+  Plan Yukta re-plans capacity, pull-in and the whole supply chain from that month, and shows the plan <b>with</b> and <b>without</b> your overrides side by side.</div>
+
+<form method="post" action="/overrides/switch" class="actions" style="margin-bottom:14px">
+  <span class="muted small">In every module:</span>
+  <button class="chip {{ 'on' if page.apply }}" name="apply" value="Y" type="submit">Overrides on</button>
+  <button class="chip {{ '' if page.apply else 'on' }}" name="apply" value="N" type="submit">Overrides off (baseline)</button>
+  <span class="muted small" style="margin-left:14px">Hardware:</span>
+  <button class="chip {{ 'on' if page.hw_limit }}" name="hw" value="Y" type="submit">Limit consignee testers to full kits</button>
+  <button class="chip {{ '' if page.hw_limit else 'on' }}" name="hw" value="N" type="submit">Ignore hardware</button>
+</form>
+
+{{ kpis(page.kpis) }}
+
+<nav class="subnav"><a href="#timeline">Capacity timeline</a><a href="#add-tester">+ Tester arrival</a><a href="#add-hardware">+ Hardware arrival</a>
+  <a href="#add-testtime">+ Test time / sites / OEE</a><a href="#add-yield">+ Yield change</a><a href="#impact">Impact by OSAT</a></nav>
+
+<section class="panel" id="timeline">
+  <div class="panel-head"><h2>Capacity timeline</h2>
+    <div class="chips">{% for k in page['keys'] %}<a class="chip {{ 'on' if k == page.sel }}" href="?res={{ k }}#timeline">OSAT-{{ k.split('|')[0] }} · {{ k.split('|')[1] }}</a>{% endfor %}</div></div>
+  <p class="sub">Bars: testers available with your overrides. Black line: testers the plan needs. Blue line: testers you would have without overrides.</p>
+  {{ page.chart|safe }}
+</section>
+{{ grid(page.timeline) }}
+
+{% macro opts(items, sel=None, kind=None) %}{% for o in items %}<option value="{{ o }}" {{ 'selected' if o == sel }}>{{ mlabel(o) if kind == 'month' else ('OSAT-' ~ o if kind == 'vendor' else o) }}</option>{% endfor %}{% endmacro %}
+{% macro del_btn(table, i, r) %}<form method="post" action="/overrides/delete" onsubmit="return confirm('Delete this override?')"><input type="hidden" name="table" value="{{ table }}"><input type="hidden" name="i" value="{{ i }}"><input type="hidden" name="sig" value="{{ r|tojson|forceescape }}"><button class="xbtn" type="submit" title="Delete this override" aria-label="Delete">✕</button></form>{% endmacro %}
+
+<div class="cols">
+<section class="panel" id="add-tester">
+  <h2>Tester arrivals &amp; removals</h2>
+  <p class="sub">From the month entered onwards. Consignee = your own testers; non-consignee = extra OSAT testers. Use negative numbers for removals or transfers.</p>
+  <form method="post" action="/overrides/add/fleet_changes" class="formgrid">
+    <label>From month<select name="Month">{{ opts(f.months, f.months[4], 'month') }}</select></label>
+    <label>OSAT<select name="Vendor">{{ opts(f.vendors, None, 'vendor') }}</select></label>
+    <label>Step<select name="Step"><option>Test1</option><option>Test2</option><option>Sort</option></select></label>
+    <label>Consignee testers ±<input type="number" name="ConsigneeChange" value="1" min="-500" max="500" step="1"></label>
+    <label>Non-consignee testers ±<input type="number" name="NonConsigneeChange" value="0" min="-500" max="500" step="1"></label>
+    <label>Reason<input name="Reason" maxlength="120" placeholder="e.g. New tester installed"></label>
+    <div><button class="btn" type="submit">Add &amp; re-plan</button></div>
+  </form>
+  <div class="tablewrap" style="margin-top:12px"><table><thead><tr><th>From</th><th>OSAT</th><th>Step</th><th class="r">Consignee</th><th class="r">Non-consignee</th><th>Reason</th><th></th></tr></thead>
+    <tbody>{% for i, r in f.rows.fleet_changes %}<tr><td>{{ r.Month|fmt('month') }}</td><td>OSAT-{{ r.Vendor }}</td><td>{{ r.Step }}</td>
+      <td class="r">{{ '%+d'|format(r.ConsigneeChange or 0) }}</td><td class="r">{{ '%+d'|format(r.NonConsigneeChange or 0) }}</td><td class="small">{{ r.Reason or '' }}</td><td>{{ del_btn('fleet_changes', i, r) }}</td></tr>
+    {% else %}<tr><td colspan="7" class="muted">No tester changes entered.</td></tr>{% endfor %}</tbody></table></div>
+</section>
+
+<section class="panel" id="add-hardware">
+  <h2>Hardware arrivals</h2>
+  <p class="sub">Sockets, load boards, probe cards or instrument cards arriving (+) or retired (−). A consignee tester runs only with a full kit, when "Limit consignee testers to full kits" is on.</p>
+  <form method="post" action="/overrides/add/hardware_arrivals" class="formgrid">
+    <label>Month<select name="Month">{{ opts(f.months, f.months[3], 'month') }}</select></label>
+    <label>OSAT<select name="Vendor">{{ opts(f.vendors, None, 'vendor') }}</select></label>
+    <label>Step<select name="Step"><option>Test1</option><option>Test2</option><option>Sort</option></select></label>
+    <label>Hardware<select name="HardwareType">{{ opts(f.hw_types) }}</select></label>
+    <label>Quantity ±<input type="number" name="Qty" value="8" min="-10000" max="10000" step="1"></label>
+    <label>Note<input name="Note" maxlength="120" placeholder="e.g. PO 4512 delivery"></label>
+    <div><button class="btn" type="submit">Add &amp; re-plan</button></div>
+  </form>
+  <div class="tablewrap" style="margin-top:12px"><table><thead><tr><th>Month</th><th>OSAT</th><th>Step</th><th>Hardware</th><th class="r">Qty</th><th>Note</th><th></th></tr></thead>
+    <tbody>{% for i, r in f.rows.hardware_arrivals %}<tr><td>{{ r.Month|fmt('month') }}</td><td>OSAT-{{ r.Vendor }}</td><td>{{ r.Step }}</td><td>{{ r.HardwareType }}</td>
+      <td class="r">{{ '%+d'|format(r.Qty) }}</td><td class="small">{{ r.Note or '' }}</td><td>{{ del_btn('hardware_arrivals', i, r) }}</td></tr>
+    {% else %}<tr><td colspan="7" class="muted">No hardware deliveries entered.</td></tr>{% endfor %}</tbody></table></div>
+  <p class="small muted" style="margin-top:8px">Hardware in service today: <a href="/data/hardware">Test hardware</a> · readiness by month: <a href="/m/hardware">Hardware Readiness</a></p>
+</section>
+</div>
+
+<div class="cols">
+<section class="panel" id="add-testtime">
+  <h2>Test time, sites &amp; OEE changes</h2>
+  <p class="sub">A new test program, a multi-site handler or an OEE improvement, from a month onwards. Fill only what changes.</p>
+  <form method="post" action="/overrides/add/capacity_overrides" class="formgrid" id="ttform">
+    <label>OSAT<select name="Vendor">{{ opts(f.vendors, None, 'vendor') }}</select></label>
+    <label>Product<select name="SKU">{{ opts(f.skus, 'ORION') }}</select></label>
+    <label>Step<select name="Step"><option>Test1</option><option>Test2</option><option>Sort</option></select></label>
+    <label>From month<select name="EffectiveMonth">{{ opts(f.months, f.months[4], 'month') }}</select></label>
+    <label>Test time (s)<input name="TestTimeSec" inputmode="decimal" placeholder="keep"></label>
+    <label>Sites<input name="Sites" inputmode="numeric" placeholder="keep"></label>
+    <label>Index time (s)<input name="IndexTimeSec" inputmode="decimal" placeholder="keep"></label>
+    <label>OEE (0-1)<input name="OEE" inputmode="decimal" placeholder="keep"></label>
+    <label style="grid-column: span 2">Note<input name="Note" maxlength="120" placeholder="e.g. Test-time reduction release"></label>
+    <div style="grid-column: 1 / -1" class="small muted" id="ttnow"></div>
+    <div><button class="btn" type="submit">Add &amp; re-plan</button></div>
+  </form>
+  <div class="tablewrap" style="margin-top:12px"><table><thead><tr><th>From</th><th>OSAT</th><th>Product</th><th>Step</th><th class="r">Test s</th><th class="r">Sites</th><th class="r">Index s</th><th class="r">OEE</th><th>Note</th><th></th></tr></thead>
+    <tbody>{% for i, r in f.rows.capacity_overrides %}{% set c = f.current.get(r.Vendor ~ '|' ~ r.SKU ~ '|' ~ r.Step) %}<tr><td>{{ r.EffectiveMonth|fmt('month') }}</td><td>OSAT-{{ r.Vendor }}</td><td>{{ r.SKU }}</td><td>{{ r.Step }}</td>
+      {% for k in ['TestTimeSec', 'Sites', 'IndexTimeSec', 'OEE'] %}<td class="r mono small">{% if r[k] is not none %}{{ c[k] if c else '?' }} → <b>{{ r[k] }}</b>{% else %}<span class="muted">–</span>{% endif %}</td>{% endfor %}
+      <td class="small">{{ r.Note or '' }}{% if not c %} <span class="badge warn">no base test time</span>{% endif %}</td><td>{{ del_btn('capacity_overrides', i, r) }}</td></tr>
+    {% else %}<tr><td colspan="10" class="muted">No test-time changes entered.</td></tr>{% endfor %}</tbody></table></div>
+</section>
+
+<section class="panel" id="add-yield">
+  <h2>Yield changes</h2>
+  <p class="sub">A yield improvement plan or an excursion at one OSAT, from a month onwards. Lower yield means more starts and more tester load.</p>
+  <form method="post" action="/overrides/add/yield_overrides" class="formgrid" id="yform">
+    <label>Product<select name="SKU">{{ opts(f.skus, 'ORION') }}</select></label>
+    <label>OSAT<select name="Vendor">{{ opts(f.vendors, None, 'vendor') }}</select></label>
+    <label>Step<select name="Operation"><option>Test1</option><option>Test2</option><option>Sort</option><option>Bump</option><option>Assembly</option><option>Pack</option></select></label>
+    <label>From month<select name="EffectiveMonth">{{ opts(f.months, f.months[2], 'month') }}</select></label>
+    <label>Yield (0-1)<input name="Yield" inputmode="decimal" required placeholder="e.g. 0.93"></label>
+    <label>Retest rate (0-1)<input name="ReworkRate" inputmode="decimal" placeholder="keep"></label>
+    <label style="grid-column: span 2">Note<input name="Note" maxlength="120" placeholder="e.g. Yield improvement plan"></label>
+    <div style="grid-column: 1 / -1" class="small muted" id="ynow"></div>
+    <div><button class="btn" type="submit">Add &amp; re-plan</button></div>
+  </form>
+  <div class="tablewrap" style="margin-top:12px"><table><thead><tr><th>From</th><th>Product</th><th>OSAT</th><th>Step</th><th class="r">Yield</th><th class="r">Retest</th><th>Note</th><th></th></tr></thead>
+    <tbody>{% for i, r in f.rows.yield_overrides %}{% set b = f.flow.get(r.SKU ~ '|' ~ r.Operation) %}<tr><td>{{ r.EffectiveMonth|fmt('month') }}</td><td>{{ r.SKU }}</td><td>OSAT-{{ r.Vendor }}</td><td>{{ r.Operation }}</td>
+      <td class="r mono small">{{ b.Yield if b else '?' }} → <b>{{ r.Yield }}</b></td><td class="r mono small">{% if r.ReworkRate is not none %}{{ b.ReworkRate if b else '?' }} → <b>{{ r.ReworkRate }}</b>{% else %}–{% endif %}</td>
+      <td class="small">{{ r.Note or '' }}</td><td>{{ del_btn('yield_overrides', i, r) }}</td></tr>
+    {% else %}<tr><td colspan="8" class="muted">No yield changes entered.</td></tr>{% endfor %}</tbody></table></div>
+</section>
+</div>
+
+<section class="panel" id="impact">
+  <h2>Impact by OSAT and test step</h2>
+  <p class="sub">Over the {{ R.plan.H }}-month horizon. Click a row to see its timeline.</p>
+  <div class="tablewrap"><table><thead><tr><th>OSAT · step</th><th class="r">Overrides</th><th class="r">Tester-months without</th><th class="r">Tester-months with</th>
+    <th class="r">Peak load without</th><th class="r">Peak load with</th><th class="r">Made late without</th><th class="r">Made late with</th><th class="r">Pull-in without</th><th class="r">Pull-in with</th></tr></thead>
+    <tbody>{% for r in page.impact %}<tr><td><a href="?res={{ r.key }}#timeline">{{ r.res }}</a></td><td class="r mono">{{ r.changes }}</td>
+      <td class="r mono">{{ r.cap_b|fmt('int') }}</td><td class="r mono">{{ r.cap_n|fmt('int') }}</td>
+      <td class="r mono" style="{{ 'color:var(--bad)' if r.peak_b > 100.5 }}">{{ r.peak_b|fmt('pct') }}</td><td class="r mono" style="{{ 'color:var(--bad)' if r.peak_n > 100.5 }}">{{ r.peak_n|fmt('pct') }}</td>
+      <td class="r mono">{{ r.gap_b|short }}</td><td class="r mono">{{ r.gap_n|short }}</td><td class="r mono">{{ r.pull_b|short }}</td><td class="r mono">{{ r.pull_n|short }}</td></tr>{% endfor %}</tbody></table></div>
+  {% if page.cust %}
+  <h3>Customer shortfall by product (peak units owed)</h3>
+  <div class="tablewrap"><table><thead><tr><th>Product</th><th class="r">Without overrides</th><th class="r">With overrides</th><th class="r">Change</th></tr></thead>
+    <tbody>{% for c in page.cust %}<tr><td>{{ c.sku }}</td><td class="r mono">{{ c.base|fmt('int') }}</td><td class="r mono">{{ c.now|fmt('int') }}</td>
+      <td class="r mono" style="color:{{ 'var(--ok)' if c.delta < 0 else 'var(--bad)' }}">{{ '%+d'|format(c.delta|round|int) }}</td></tr>{% endfor %}</tbody></table></div>
+  {% endif %}
+</section>
+<script>
+(function(){
+  var cur = {{ f.current|tojson }}, flow = {{ f.flow|tojson }};
+  function tt(){ var fm=document.getElementById('ttform'); if(!fm) return; var k=fm.Vendor.value+'|'+fm.SKU.value+'|'+fm.Step.value, c=cur[k];
+    document.getElementById('ttnow').textContent = c ? ('Today: test time '+c.TestTimeSec+' s, '+c.Sites+' sites, index '+c.IndexTimeSec+' s, OEE '+c.OEE+'.') : 'This OSAT has no test time for this product and step yet: add it in Test times & rates first.'; }
+  function yy(){ var fm=document.getElementById('yform'); if(!fm) return; var b=flow[fm.SKU.value+'|'+fm.Operation.value];
+    document.getElementById('ynow').textContent = b ? ('Process flow today: yield '+b.Yield+', retest '+b.ReworkRate+'.') : 'This product has no such step in its process flow.'; }
+  ['Vendor','SKU','Step'].forEach(function(n){ var e=document.querySelector('#ttform [name='+n+']'); if(e) e.addEventListener('change', tt); });
+  ['SKU','Operation'].forEach(function(n){ var e=document.querySelector('#yform [name='+n+']'); if(e) e.addEventListener('change', yy); });
+  tt(); yy();
+})();
+</script>
+{% endblock %}

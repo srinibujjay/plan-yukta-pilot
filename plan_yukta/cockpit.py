@@ -90,10 +90,12 @@ class Chain:
 
 
 class Plan:
-    def __init__(self, ws: dict):
+    def __init__(self, ws: dict, apply_overrides: bool | None = None):
         self.ws = ws
         self.t = ws['tables']
         self.s = settings_dict(ws)
+        # overrides = future tester arrivals/removals, hardware arrivals, test-time/OEE changes, yield changes
+        self.apply = (self.s.get('Apply overrides', 'Y') == 'Y') if apply_overrides is None else apply_overrides
         self.issues = []          # data checks found while planning
         self.alerts = []          # planning alerts
         self._setup()
@@ -124,10 +126,17 @@ class Plan:
         self.cap = {(r['Vendor'], r['SKU'], r['Step']): r for r in self.t['tester_capacity']}
         self.fleet = {(r['Vendor'], r['Step']): r for r in self.t['tester_fleet']}
         self.overrides = defaultdict(list)
-        for r in self.t['yield_overrides']:
-            self.overrides[(r['SKU'], r['Vendor'], r['Operation'])].append(r)
-        for v in self.overrides.values():
+        self.cap_over = defaultdict(list)
+        self.fleet_changes = list(self.t.get('fleet_changes', [])) if self.apply else []
+        self.hw_arrivals = list(self.t.get('hardware_arrivals', [])) if self.apply else []
+        if self.apply:
+            for r in self.t['yield_overrides']:
+                self.overrides[(r['SKU'], r['Vendor'], r['Operation'])].append(r)
+            for r in self.t.get('capacity_overrides', []):
+                self.cap_over[(r['Vendor'], r['SKU'], r['Step'])].append(r)
+        for v in list(self.overrides.values()) + list(self.cap_over.values()):
             v.sort(key=lambda r: r['EffectiveMonth'])
+        self._upm_cache = {}
         self.bins = defaultdict(list)
         for r in self.t['bin_splits']:
             self.bins[r['SKU']].append((r['Bin'], float(r['Fraction'])))
@@ -169,9 +178,28 @@ class Plan:
             u *= self.yld(sku, vendor, op, pos)
         return u
 
-    def upm(self, vendor, sku, step):
-        """Units (wafers for Sort) one tester can test in a month."""
+    def test_params(self, vendor, sku, step, i=0):
+        """Test time, sites, index and OEE in plan month i, after any test-time / OEE override."""
         c = self.cap.get((vendor, sku, step))
+        if not c:
+            return None
+        c = dict(c)
+        c['_override'] = None
+        m = self.months_x[min(max(i, 0), self.HX - 1)]
+        for o in self.cap_over.get((vendor, sku, step), []):
+            if o['EffectiveMonth'] <= m:
+                for k in ('TestTimeSec', 'Sites', 'IndexTimeSec', 'OEE'):
+                    if o.get(k) is not None:
+                        c[k] = o[k]
+                c['_override'] = o
+        return c
+
+    def upm(self, vendor, sku, step, i=0):
+        """Units (wafers for Sort) one tester can test in plan month i."""
+        key = (vendor, sku, step, i)
+        if key in self._upm_cache:
+            return self._upm_cache[key]
+        c = self.test_params(vendor, sku, step, i)
         f = self.fleet.get((vendor, step))
         if not c:
             return 0.0, None
@@ -183,7 +211,9 @@ class Plan:
             sec = td * (float(c['TestTimeSec']) + float(c['IndexTimeSec'])) + float(c.get('WaferLoadSec') or 0)
         else:
             sec = (float(c['TestTimeSec']) + float(c['IndexTimeSec'])) / float(c['Sites'])
-        return (avail / sec if sec > 0 else 0.0), sec
+        out = ((avail / sec if sec > 0 else 0.0), sec)
+        self._upm_cache[key] = out
+        return out
 
     # ------------------------------------------------------------------ demand
     def demand_plan(self):
@@ -307,16 +337,31 @@ class Plan:
         """(vendor, step) -> list over plan months of (consignee, non-consignee)."""
         out = {}
         HX = self.HX
+        self.events = defaultdict(lambda: [[] for _ in range(HX)])    # (vendor, step) -> per month: change notes
         for (v, st), f in self.fleet.items():
             c = [int(f['Consignee'])] * HX
             n = [int(f['NonConsignee'])] * HX
-            for ch in self.t['fleet_changes']:
+            for ch in sorted(self.fleet_changes, key=lambda r: r['Month']):
                 if ch['Vendor'] == v and ch['Step'] == st:
                     i0 = max(0, month_diff(ch['Month'], self.start))
+                    if i0 < HX:
+                        dc, dn = int(ch['ConsigneeChange'] or 0), int(ch['NonConsigneeChange'] or 0)
+                        self.events[(v, st)][i0].append(' '.join(x for x in (f'{dc:+d} C' if dc else '', f'{dn:+d} NC' if dn else '') if x))
                     for i in range(i0, HX):
                         c[i] = max(0, c[i] + int(ch['ConsigneeChange'] or 0))
                         n[i] = max(0, n[i] + int(ch['NonConsigneeChange'] or 0))
             out[(v, st)] = [c, n]
+        for r in self.hw_arrivals:
+            i0 = month_diff(r['Month'], self.start)
+            if 0 <= i0 < HX:
+                self.events[(r['Vendor'], r['Step'])][i0].append(f'{int(r["Qty"]):+d} {r["HardwareType"].lower()}')
+        for (v, sku, st), items in self.cap_over.items():
+            for o in items:
+                i0 = month_diff(o['EffectiveMonth'], self.start)
+                if 0 <= i0 < HX:
+                    what = ', '.join(f'{lab} {o[k]:g}' for k, lab in (('TestTimeSec', 'test s'), ('Sites', 'sites'),
+                                                                      ('IndexTimeSec', 'index s'), ('OEE', 'OEE')) if o.get(k) is not None)
+                    self.events[(v, st)][i0].append(f'{sku}: {what}')
         self.fleet_m = out
         # hardware-ready consignee testers
         hw = defaultdict(list)
@@ -330,9 +375,9 @@ class Plan:
                 kits = []
                 for r in items:
                     qty = int(r['InService'] or 0)
-                    if r.get('OnOrder') and r.get('ArrivalMonth') and r['ArrivalMonth'] <= m:
-                        qty += int(r['OnOrder'])
-                    kits.append(qty // max(1, int(r['PerTester'])))
+                    qty += sum(int(a['Qty']) for a in self.hw_arrivals if a['Vendor'] == r['Vendor'] and a['Step'] == r['Step']
+                               and a['HardwareType'].strip().lower() == r['HardwareType'].strip().lower() and a['Month'] <= m)
+                    kits.append(max(0, qty) // max(1, int(r['PerTester'])))
                 ready.append(min(kits) if kits else 0)
             self.hw_ready[key] = ready
         self.cap_m = {}
@@ -358,7 +403,7 @@ class Plan:
         H = self.HX
         cc, nn = self.cap_m.get((vendor, step), ([0] * H, [0] * H))
         skus = sorted(loads, key=lambda k: (-int(self.products[k]['Priority']), k))
-        upm = {k: self.upm(vendor, k, step)[0] for k in skus}
+        upm = {k: [self.upm(vendor, k, step, i)[0] for i in range(H)] for k in skus}   # per month: overrides change it
         earliest = earliest or {}
         res = {k: {'load': list(loads[k]), 'tc': [0.0] * H, 'tn': [0.0] * H, 'prod': [0.0] * H, 'prod_c': [0.0] * H,
                    'gap': [0.0] * H, 'pullin': [0.0] * H, 'covered': [0.0] * H, 'catchup': [0.0] * H,
@@ -367,7 +412,9 @@ class Plan:
 
         def give(k, m, units):
             """Use idle tester time in month m for product k; returns units made."""
-            r, u = res[k], upm[k]
+            r, u = res[k], upm[k][m]
+            if u <= 0:
+                return 0.0
             want = units / u
             a_c = min(want, idle_c[m])
             idle_c[m] -= a_c
@@ -384,14 +431,14 @@ class Plan:
                 L = loads[k][i]
                 if L <= EPS:
                     continue
-                if upm[k] <= 0:
+                if upm[k][i] <= 0:
                     res[k]['gap'][i] = L
                     continue
                 made = give(k, i, L)
                 res[k]['gap'][i] = max(0.0, L - made)
         for k in skus:                                    # pull-in
             p = self.products[k]
-            if p['PullIn'] != 'Y' or upm[k] <= 0:
+            if p['PullIn'] != 'Y' or max(upm[k]) <= 0:
                 continue
             cap_share = min(float(p['ServiceLevelPct']), float(p['MaxPullInPct'])) / 100.0
             lo = earliest.get(k, 0)
@@ -410,7 +457,7 @@ class Plan:
                         res[k]['covered'][g] += made
                         res[k]['gap'][g] -= made
         for k in skus:                                    # catch-up of what is still short
-            if upm[k] <= 0:
+            if max(upm[k]) <= 0:
                 continue
             owed = 0.0
             for i in range(H):
@@ -422,8 +469,8 @@ class Plan:
                 res[k]['late_left'][i] = owed
         summary = []
         for i in range(H):
-            used = sum(res[k]['prod'][i] / upm[k] for k in skus if upm[k] > 0)
-            need_frac = sum(loads[k][i] / upm[k] for k in skus if upm[k] > 0)
+            used = sum(res[k]['prod'][i] / upm[k][i] for k in skus if upm[k][i] > 0)
+            need_frac = sum(loads[k][i] / upm[k][i] for k in skus if upm[k][i] > 0)
             total = cc[i] + nn[i]
             summary.append({'month': self.months_x[i], 'consignee': cc[i], 'non_consignee': nn[i], 'total': total,
                             'fleet_consignee': self.fleet_m.get((vendor, step), [[0] * H])[0][i],
@@ -433,6 +480,7 @@ class Plan:
                             'load_util': (need_frac / total * 100) if total else (100.0 if need_frac > EPS else 0.0),
                             'gap': sum(res[k]['gap'][i] for k in skus), 'pullin': sum(res[k]['pullin'][i] for k in skus),
                             'catchup': sum(res[k]['catchup'][i] for k in skus),
+                            'events': list(self.events[(vendor, step)][i]) if hasattr(self, 'events') else [],
                             'late_left': sum(res[k]['late_left'][i] for k in skus)})
         return res, summary, upm
 
@@ -770,8 +818,8 @@ class Plan:
 # ======================================================================================
 # Module views built on a finished Plan
 # ======================================================================================
-def compute(ws: dict) -> dict:
-    p = Plan(ws).run()
+def compute(ws: dict, apply_overrides: bool | None = None) -> dict:
+    p = Plan(ws, apply_overrides).run()
     R = {'plan': p, 'months': p.months, 'settings': p.s}
     R['demand'] = demand_view(p)
     R['testing'] = testing_view(p)
@@ -821,13 +869,13 @@ def testing_view(p: Plan):
                 continue
             lvl = ch.levels[op]
             r = lvl['alloc']
-            upm = p.alloc[(ch.vendor, op)]['upm'][ch.sku]
+            upm_m = p.alloc[(ch.vendor, op)]['upm'][ch.sku]
             for i in range(p.H):
                 lines.append({'month': p.months[i], 'sku': ch.sku, 'vendor': ch.vendor, 'step': op,
                               'share': ch.share * 100, 'yield': lvl['yield'][PAD + i] * 100, 'rework': lvl['rw'][PAD + i] * 100,
                               'good_out': lvl['net_out'][PAD + i + lvl['delta']] if PAD + i + lvl['delta'] < p.N else 0,
                               'starts_req': lvl['starts_req'][PAD + i], 'ins_req': r['load'][i],
-                              'upm': upm, 'tc': r['tc'][i], 'tn': r['tn'][i], 'prod': r['prod'][i], 'gap': r['gap'][i],
+                              'upm': upm_m[i], 'tc': r['tc'][i], 'tn': r['tn'][i], 'prod': r['prod'][i], 'gap': r['gap'][i],
                               'pullin': r['pullin'][i], 'covered': r['covered'][i],
                               'starts': lvl['starts'][PAD + i]})
     caps = []
@@ -1338,7 +1386,8 @@ def hardware_view(p: Plan):
                              'text': f'Only {r["ready"]} of {r["fleet_c"]} consignee testers at OSAT-{r["vendor"]} {r["step"]} have a full '
                                      f'hardware kit in {r["month"]}.'})
     items = [dict(r) for r in p.t['hardware']]
-    return {'rows': rows, 'items': items}
+    arrivals = sorted([dict(r) for r in p.t.get('hardware_arrivals', [])], key=lambda r: r['Month'])
+    return {'rows': rows, 'items': items, 'arrivals': arrivals}
 
 
 def ate_view(p: Plan, R):
@@ -1358,7 +1407,7 @@ def ate_view(p: Plan, R):
             ncu = sum(x - y for x, y in zip(r['prod'][:p.H], r['prod_c'][:p.H]))
             nc_units += ncu
             saving_units += ncu * (float(c['CostNonConsigneeUSD']) - float(c['CostConsigneeUSD']))
-            upms.append(a['upm'][sku])
+            upms.append(sum(a['upm'][sku][:p.H]) / p.H)
             gap_units += sum(r['gap'][:p.H])
         if not upms:
             continue

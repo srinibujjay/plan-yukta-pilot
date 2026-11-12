@@ -119,6 +119,22 @@ def results(wsid, ws):
     return R
 
 
+_base_cache = {}
+
+
+def baseline_results(wsid, ws):
+    """The same plan with every override switched off, for the with/without comparison."""
+    key = (wsid, ws.get('version'), ws.get('saved_at'))
+    hit = _base_cache.get(wsid)
+    if hit and hit[0] == key:
+        return hit[1]
+    Rb = cockpit.compute(ws, apply_overrides=False)
+    if len(_base_cache) > 64:
+        _base_cache.clear()
+    _base_cache[wsid] = (key, Rb)
+    return Rb
+
+
 def edited_tables(ws):
     return sorted(ws.get('edited', []))
 
@@ -216,6 +232,9 @@ def module_page(key):
     R = results(wsid, ws)
     if key in BUILDERS:
         return render_page(key, BUILDERS[key](R, request.args), R, ws)
+    if key == 'overrides':
+        Rb = baseline_results(wsid, ws)
+        return render_page(key, views.overrides(R, Rb, request.args, ws), R, ws)
     if key == 'snapshots':
         return render_page(key, views.snapshots(R, request.args, ws), R, ws)
     if key == 'atp':
@@ -612,6 +631,80 @@ def sku_create():
     W.save(wsid, ws)
     summary = ', '.join(f'{W.TABLES[k]["title"]} +{v}' for k, v in added.items() if v)
     return redirect(url_for('module_page', key='sku-setup', msg=f'{new} created. {summary}.', new=new))
+
+
+# ------------------------------------------------------------------ overrides
+@app.post('/overrides/add/<table>')
+def override_add(table):
+    if table not in views.OVERRIDE_TABLES:
+        abort(404)
+    wsid, ws = ws_get()
+    cols = [c['name'] for c in W.TABLES[table]['columns']]
+    row = {c: (request.form.get(c) or '').strip() or None for c in cols}
+    if table == 'capacity_overrides' and not any(row.get(k) for k in ('TestTimeSec', 'Sites', 'IndexTimeSec', 'OEE')):
+        return redirect(url_for('module_page', key='overrides', err='Fill at least one of test time, sites, index time or OEE.') + '#add-testtime')
+    def _num(v):
+        try:
+            return float(v or 0)
+        except ValueError:
+            return 1.0      # let validation report the bad value
+    if table == 'fleet_changes' and not (_num(row.get('ConsigneeChange')) or _num(row.get('NonConsigneeChange'))):
+        return redirect(url_for('module_page', key='overrides', err='Enter a number of testers to add or remove.') + '#add-tester')
+    if table == 'fleet_changes':
+        row['ConsigneeChange'] = row.get('ConsigneeChange') or 0
+        row['NonConsigneeChange'] = row.get('NonConsigneeChange') or 0
+    keycols = W.TABLES[table]['key']
+    rows = [r for r in ws['tables'].get(table, []) if [str(r.get(k)).upper() for k in keycols] != [str(row.get(k)).upper() for k in keycols]]
+    replaced = len(rows) != len(ws['tables'].get(table, []))
+    clean, errors = W.validate_rows(table, rows + [row])
+    anchor = {'fleet_changes': '#add-tester', 'hardware_arrivals': '#add-hardware', 'capacity_overrides': '#add-testtime',
+              'yield_overrides': '#add-yield'}[table]
+    if errors:
+        i, c, m = errors[0]
+        return redirect(url_for('module_page', key='overrides', err=f'{c}: {m}. Nothing was added.') + anchor)
+    ws['tables'][table] = clean
+    _mark_edited(ws, table)
+    W.save(wsid, ws)
+    app.logger.info('PILOT override tester=%s table=%s', session.get('tester', '-'), table)
+    msg = ('Override updated (same month and resource as an existing one).' if replaced else 'Override added.') + ' The plan has been recalculated.'
+    return redirect(url_for('module_page', key='overrides', msg=msg, res=f'{row.get("Vendor")}|{row.get("Step") or row.get("Operation")}') + '#timeline')
+
+
+@app.post('/overrides/delete')
+def override_delete():
+    table = request.form.get('table')
+    if table not in views.OVERRIDE_TABLES:
+        abort(404)
+    wsid, ws = ws_get()
+    rows = ws['tables'].get(table, [])
+    try:
+        i = int(request.form.get('i', -1))
+        sig = json.loads(request.form.get('sig') or '{}')
+    except ValueError:
+        i, sig = -1, {}
+    if 0 <= i < len(rows) and all(str(rows[i].get(k)) == str(v) for k, v in sig.items()):
+        rows.pop(i)
+        _mark_edited(ws, table)
+        W.save(wsid, ws)
+        return redirect(url_for('module_page', key='overrides', msg='Override deleted. The plan has been recalculated.'))
+    return redirect(url_for('module_page', key='overrides', err='That override has already changed; reload and try again.'))
+
+
+@app.post('/overrides/switch')
+def override_switch():
+    wsid, ws = ws_get()
+    change = {}
+    if request.form.get('apply') in ('Y', 'N'):
+        change['Apply overrides'] = request.form['apply']
+    if request.form.get('hw') in ('Y', 'N'):
+        change['Limit testers to hardware-ready'] = request.form['hw']
+    rows = [dict(r, Value=change.get(r['Setting'], r['Value'])) for r in ws['tables']['settings']]
+    clean, errors = W.validate_rows('settings', rows)
+    if not errors:
+        ws['tables']['settings'] = clean
+        _mark_edited(ws, 'settings')
+        W.save(wsid, ws)
+    return redirect(url_for('module_page', key='overrides', msg='Setting changed; every module has been re-planned.'))
 
 
 # ------------------------------------------------------------------ exports

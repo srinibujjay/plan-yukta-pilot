@@ -80,6 +80,23 @@ Upstream steps are planned from the starts the testers can actually make, so a t
 
 Load % = Σ load ÷ units per tester-month ÷ testers available. Above 85% is tight; above 100% the month cannot be made on time.
 
+## 6a. Overrides: future testers, hardware, test time and yield
+
+Four tables hold dated changes, entered on **Tester & Capacity Overrides**:
+
+| Override | Effect from its month onwards |
+|---|---|
+| Tester arrivals & removals | consignee / non-consignee testers at an OSAT and step change by ± n |
+| Hardware arrivals | in-service hardware of a type changes by ± n; hardware-ready testers = min over types ⌊quantity ÷ per tester⌋ |
+| Test time & OEE changes | test time, sites, index time and/or OEE for a product at an OSAT are replaced, so units per tester-month change |
+| Yield changes | yield and retest rate for a product, OSAT and step are replaced |
+
+Each override applies to its own month and every later month. When two overrides of the same kind fall in the same month for the same resource, adding the second replaces the first. Allocation, pull-in and catch-up (section 6) run on the capacity of each month after overrides, so a tester arriving in July changes how much is built ahead in March to June.
+
+**Baseline.** The same plan with all four tables ignored. The overrides page shows both plans side by side: testers, load %, pull-in, units made late, customer shortfall and revenue lost. The setting "Apply overrides" = N makes every module show the baseline.
+
+**Build-ahead stock** (Pull-in & Service Level page) = cumulative (made − needed) at a test step, when positive, converted to good units: ÷ (1 + retest) × yield. **Still owed** = cumulative shortfall not yet caught up.
+
 ## 7. Fab wafers
 
 - Wafers needed at sort, per product, = Σ over OSATs of Sort starts, moved earlier by the fab-to-OSAT transit.

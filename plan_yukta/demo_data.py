@@ -189,22 +189,31 @@ def build() -> dict:
     hw = []
     for (v, st), (m, c, nc) in FLEET.items():
         if st == 'Sort':
-            hw.append(dict(Vendor=v, Step=st, HardwareType='Probe card', PerTester=1, InService=c, OnOrder=None, ArrivalMonth=None))
+            hw.append(dict(Vendor=v, Step=st, HardwareType='Probe card', PerTester=1, InService=c))
             continue
-        hw.append(dict(Vendor=v, Step=st, HardwareType='Socket kit', PerTester=8, InService=8 * c, OnOrder=None, ArrivalMonth=None))
-        hw.append(dict(Vendor=v, Step=st, HardwareType='Load board', PerTester=1, InService=c, OnOrder=None, ArrivalMonth=None))
-        hw.append(dict(Vendor=v, Step=st, HardwareType='Instrument card', PerTester=4, InService=4 * c, OnOrder=None, ArrivalMonth=None))
+        hw.append(dict(Vendor=v, Step=st, HardwareType='Socket kit', PerTester=8, InService=8 * c))
+        hw.append(dict(Vendor=v, Step=st, HardwareType='Load board', PerTester=1, InService=c))
+        hw.append(dict(Vendor=v, Step=st, HardwareType='Instrument card', PerTester=4, InService=4 * c))
     for r in hw:
-        if (r['Vendor'], r['Step']) == ('A', 'Test1'):
-            if r['HardwareType'] == 'Instrument card':
-                r.update(InService=22, OnOrder=10, ArrivalMonth='2027-02')     # 5 testers ready until Feb
-            elif r['HardwareType'] == 'Socket kit':
-                r.update(OnOrder=16, ArrivalMonth='2027-06')
-            elif r['HardwareType'] == 'Load board':
-                r.update(OnOrder=2, ArrivalMonth='2027-06')
+        if (r['Vendor'], r['Step'], r['HardwareType']) == ('A', 'Test1', 'Instrument card'):
+            r['InService'] = 22                       # only 5 full kits until more cards arrive
         if (r['Vendor'], r['Step'], r['HardwareType']) == ('C', 'Test1', 'Load board'):
-            r.update(InService=2, OnOrder=1, ArrivalMonth='2027-01')          # one load board in repair
+            r['InService'] = 1                        # one load board out for repair
     t['hardware'] = hw
+    t['hardware_arrivals'] = [
+        dict(Month='2027-01', Vendor='C', Step='Test1', HardwareType='Load board', Qty=1, Note='Repaired load board returns'),
+        dict(Month='2027-02', Vendor='A', Step='Test1', HardwareType='Instrument card', Qty=10, Note='Instrument cards on PO'),
+        dict(Month='2027-06', Vendor='A', Step='Test1', HardwareType='Socket kit', Qty=16, Note='Kits for the two new testers'),
+        dict(Month='2027-06', Vendor='A', Step='Test1', HardwareType='Load board', Qty=2, Note='Kits for the two new testers'),
+    ]
+    t['capacity_overrides'] = [
+        dict(Vendor='A', SKU='ORION', Step='Test1', EffectiveMonth='2027-05', TestTimeSec=32, Sites=None, IndexTimeSec=None, OEE=None,
+             Note='Test-time reduction: new test program release'),
+        dict(Vendor='B', SKU='VEGA', Step='Test1', EffectiveMonth='2027-06', TestTimeSec=None, Sites=8, IndexTimeSec=1.0, OEE=None,
+             Note='Octal-site handler upgrade'),
+        dict(Vendor='C', SKU='ORION', Step='Test1', EffectiveMonth='2027-03', TestTimeSec=None, Sites=None, IndexTimeSec=None, OEE=0.86,
+             Note='OEE improvement plan at OSAT-C'),
+    ]
 
     # ---------------- OSAT WIP snapshot, in each vendor's own codes ----------------
     pcode = {'A': {'ORION': 'ORN-A0', 'VEGA': 'VGA-A0', 'LYRA': 'LYR-A0', 'NOVA': 'NOV-A0'},

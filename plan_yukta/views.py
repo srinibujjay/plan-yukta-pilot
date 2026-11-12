@@ -255,10 +255,12 @@ def testing(R, args):
     groups = []
     for (sku, v, st), ls in sorted(by.items(), key=lambda kv: (kv[0][1], kv[0][2], kv[0][0])):
         ls.sort(key=lambda l: l['month'])
-        u = ls[0]['upm']
-        groups.append({'title': f'{sku} · OSAT-{v} · {st}', 'sub': f'share {ls[0]["share"]:.0f}% · {u:,.0f} units per tester-month',
+        u0, u1 = min(l['upm'] for l in ls), max(l['upm'] for l in ls)
+        utxt = f'{u0:,.0f}' if abs(u1 - u0) < 1 else f'{ls[0]["upm"]:,.0f} → {ls[-1]["upm"]:,.0f} (override)'
+        groups.append({'title': f'{sku} · OSAT-{v} · {st}', 'sub': f'share {ls[0]["share"]:.0f}% · {utxt} units per tester-month',
                        'rows': [
                            {'label': 'Test yield / retest', 'cells': [(f'{l["yield"]:.0f}% / {l["rework"]:.0f}%', '') for l in ls]},
+                           {'label': 'Units per tester-month', 'cells': [cell(l['upm'], 'info' if i and abs(l['upm'] - ls[i - 1]['upm']) > 1 else '') for i, l in enumerate(ls)]},
                            {'label': 'Starts required', 'cells': [cell(l['starts_req']) for l in ls]},
                            {'label': 'Tester load (insertions)', 'cells': [cell(l['ins_req']) for l in ls]},
                            {'label': 'Consignee testers', 'cells': [cell(l['tc'], '', 'num1') for l in ls]},
@@ -288,7 +290,80 @@ def pullin(R, args):
         rows.append({'sku': sku, 'pull': pr['PullIn'], 'sl': pr['ServiceLevelPct'], 'max': pr['MaxPullInPct'],
                      'cap': min(float(pr['ServiceLevelPct']), float(pr['MaxPullInPct'])) if pr['PullIn'] == 'Y' else 0,
                      'prio': pr['Priority'], 'ss': pr['SafetyStockWeeks'], 'pulled': pulls, 'covered': cov, 'left': gaps})
-    return page('pullin', [], extra={'template': 'pullin.html', 'rows': rows, 'horizon': p.s['Pull-in horizon months']})
+    sections = pullin_plan(R, args)
+    return page('pullin', sections, extra={'template': 'pullin.html', 'rows': rows, 'horizon': p.s['Pull-in horizon months']},
+                filters=filter_spec(R))
+
+
+def pullin_plan(R, args):
+    """Build-ahead production plan: what each test step makes against what it needs, the stock it builds
+    ahead of a crunch, what it still owes, and finished goods against safety stock."""
+    p = R['plan']
+    H, months = p.H, p.months
+    stock_by = {'Test1': [0.0] * H, 'Test2': [0.0] * H, 'Sort': [0.0] * H}
+    owed_by = [0.0] * H
+    groups = []
+    for ch in p.chains:
+        if (args.get('sku') and ch.sku != args['sku']) or (args.get('vendor') and ch.vendor != args['vendor']):
+            continue
+        for op in ('Sort', 'Test1', 'Test2'):
+            if op not in ch.ops:
+                continue
+            lvl = ch.levels[op]
+            r = lvl['alloc']
+            unit = 'wafers' if op == 'Sort' else 'units'
+            ahead, cum = [], 0.0
+            for i in range(H):
+                cum += r['prod'][i] - r['load'][i]
+                rw = lvl['rw'][PAD + i] if op != 'Sort' else 0.0
+                y = 1.0 if op == 'Sort' else lvl['yield'][PAD + i]
+                good = max(0.0, cum) / (1 + rw) * y           # good units (or wafers) already made for later months
+                ahead.append(good)
+                stock_by[op][i] += good
+            for i in range(H):
+                owed_by[i] += r['late_left'][i] if op != 'Sort' else 0.0
+            if not (sum(r['pullin'][:H]) > 0.5 or sum(r['catchup'][:H]) > 0.5):
+                continue
+            groups.append({'title': f'{ch.sku} · OSAT-{ch.vendor} · {op}', 'sub': f'{unit}; pull-in cap {min(float(p.products[ch.sku]["ServiceLevelPct"]), float(p.products[ch.sku]["MaxPullInPct"])):.0f}% ({"on" if p.products[ch.sku]["PullIn"] == "Y" else "off"})',
+                           'rows': [
+                               {'label': 'Needed (tester load)', 'cells': [cell(x) for x in r['load'][:H]]},
+                               {'label': 'Made', 'cells': [cell(x, 'strong') for x in r['prod'][:H]], 'strong': True},
+                               {'label': 'Of which built early (pull-in)', 'cells': [cell(x, 'info' if x > 0.5 else '') for x in r['pullin'][:H]]},
+                               {'label': 'Of which made late (catch-up)', 'cells': [cell(x, 'warn' if x > 0.5 else '') for x in r['catchup'][:H]]},
+                               {'label': 'Build-ahead stock after the step, end of month', 'cells': [cell(x, 'info' if x > 0.5 else '') for x in ahead]},
+                               {'label': 'Still owed (behind plan)', 'cells': [cell(x, 'bad' if x > 0.5 else '') for x in r['late_left'][:H]]},
+                           ]})
+    fg = [0.0] * H
+    ss = [0.0] * H
+    dem = [0.0] * H
+    for (sku, v), f in p.fg.items():
+        if (args.get('sku') and sku != args['sku']) or (args.get('vendor') and v != args['vendor']):
+            continue
+        for i in range(H):
+            fg[i] += f['fg_end'][i]
+            ss[i] += f['ss'][i]
+            dem[i] += f['demand'][i]
+    cover = [(fg[i] / (dem[min(i + 1, H - 1)] / 4.33) if dem[min(i + 1, H - 1)] else None) for i in range(H)]
+    summary = grid('Stock by process, end of month', months, [{'title': '', 'rows': [
+        {'label': 'Build-ahead after Sort (wafers)', 'cells': [cell(x, 'info' if x > 0.5 else '') for x in stock_by['Sort']]},
+        {'label': 'Build-ahead after Test 1 (units)', 'cells': [cell(x, 'info' if x > 0.5 else '') for x in stock_by['Test1']]},
+        {'label': 'Build-ahead after Test 2 (units)', 'cells': [cell(x, 'info' if x > 0.5 else '') for x in stock_by['Test2']]},
+        {'label': 'Finished goods (units)', 'cells': [cell(x, 'strong') for x in fg], 'strong': True},
+        {'label': 'Safety stock target (units)', 'cells': [cell(x) for x in ss]},
+        {'label': 'Finished goods cover (weeks)', 'cells': [(f'{c:.1f}' if c is not None else '–', 'warn' if c is not None and c < 1 else '') for c in cover]},
+        {'label': 'Test units still owed (behind plan)', 'cells': [cell(x, 'bad' if x > 0.5 else '') for x in owed_by]},
+    ]}], 'Build-ahead stock = units a test step has already made for a later month (good units, after yield). It is used up when the crunch comes.')
+    ch_html = charts.bars(months, [('Build-ahead after Test 1', stock_by['Test1']), ('Build-ahead after Test 2', stock_by['Test2'])],
+                          lines=[('Test units still owed', owed_by)], title='Build-ahead stock')
+    out = [chart('Pull-in production plan: stock built ahead of the crunch', ch_html,
+                 'Stock rises while idle testers build ahead, peaks just before the crunch, and is used up during it. The line shows units the testers still owe after it.'),
+           summary]
+    if groups:
+        out.append(grid('Build-ahead plan by product, OSAT and step', months, groups,
+                        'Only steps with pull-in or catch-up are shown. Change caps above, or capacity on Tester & Capacity Overrides.'))
+    else:
+        out.append(callout('No pull-in or catch-up in this plan: every test step can make its load in the month it is needed.', 'ok'))
+    return out
 
 
 # ------------------------------------------------------------------ M2 / M3
@@ -411,6 +486,7 @@ def testers(R, args):
     for (v, st) in sorted({(c['vendor'], c['step']) for c in caps}, key=lambda k: (TEST_OPS.index(k[1]), k[0])):
         cs = [c for c in caps if c['vendor'] == v and c['step'] == st]
         groups.append({'title': f'OSAT-{v} · {st}', 'rows': [
+            {'label': 'Overrides this month', 'cells': [('; '.join(c['events']), 'ev') if c['events'] else ('', '') for c in cs]},
             {'label': 'Testers available', 'cells': [(f'{c["consignee"]}+{c["non_consignee"]}', '') for c in cs]},
             {'label': 'Testers needed', 'cells': [cell(c['needed'], '', 'num1') for c in cs]},
             {'label': 'Load %', 'cells': [cell(c['load_util'], util_tone(c['load_util']), 'pct') for c in cs], 'strong': True},
@@ -453,15 +529,19 @@ def hardware(R, args):
     sections = [{'type': 'kpis', 'items': [
         K('Tester-months without a full kit', str(sum(r['gap'] for r in rows)), 'consignee testers × months', 'warn' if gaps else 'ok'),
         K('Hardware limit in the plan', 'On' if p.hw_limit else 'Off', '"Limit testers to hardware-ready"', 'info'),
-        K('Deliveries due', str(sum(1 for i in H['items'] if i.get('OnOrder'))), 'hardware lines on order'),
+        K('Deliveries due', str(len(H['arrivals'])), 'hardware arrival overrides', 'info'),
     ]}, grid('Hardware-ready testers', months, groups,
              'Red: fewer full kits than consignee testers. Amber: the plan uses more consignee tester time than has hardware.')]
     items = [dict(i, vendor=f'OSAT-{i["Vendor"]}', ready=(int(i['InService'] or 0) // max(1, int(i['PerTester'])))) for i in H['items']
              if not args.get('vendor') or i['Vendor'] == args['vendor']]
     sections.append(table('Hardware items', [col('vendor', 'OSAT'), col('Step', 'Step'), col('HardwareType', 'Hardware'),
                                              col('PerTester', 'Per tester', 'int'), col('InService', 'In service', 'int'),
-                                             col('ready', 'Testers it supports', 'int'), col('OnOrder', 'On order', 'int'),
-                                             col('ArrivalMonth', 'Arrives', 'month')], items))
+                                             col('ready', 'Testers it supports today', 'int')], items))
+    arr = [dict(a, vendor=f'OSAT-{a["Vendor"]}') for a in H['arrivals'] if not args.get('vendor') or a['Vendor'] == args['vendor']]
+    sections.append(table('Hardware arrivals (overrides)', [col('Month', 'Month', 'month'), col('vendor', 'OSAT'), col('Step', 'Step'),
+                                                           col('HardwareType', 'Hardware'), col('Qty', 'Quantity', 'int'), col('Note', 'Note')],
+                          arr, search=False, empty='No hardware deliveries entered.',
+                          note='Add or change deliveries on the Tester & Capacity Overrides page.'))
     return page('hardware', sections, filters=[('vendor', 'OSAT', sorted({c.vendor for c in p.chains}))])
 
 
@@ -822,3 +902,111 @@ def snapshots(R, args, ws):
                     rows.append({'sku': sku, 'month': m, 'metric': label, 'snap': va, 'now': vb, 'delta': vb - va,
                                  'pct': (vb - va) / va * 100 if va else None, 'tone': 'up' if vb > va else 'down'})
     return page('snapshots', [], extra={'template': 'snapshots.html', 'snaps': snaps, 'sel': s, 'rows': rows})
+
+
+# ------------------------------------------------------------------ overrides (USP)
+OVERRIDE_TABLES = ('fleet_changes', 'hardware_arrivals', 'capacity_overrides', 'yield_overrides')
+
+
+def overrides(R, Rb, args, ws):
+    """Tester & capacity overrides: entry points plus the plan with and without them."""
+    p, pb = R['plan'], Rb['plan']
+    t = ws['tables']
+    keys = sorted(p.alloc, key=lambda k: (k[0], TEST_OPS.index(k[1])))
+    sel = args.get('res')
+    if sel not in [f'{v}|{s}' for v, s in keys]:
+        sel = max(keys, key=lambda k: max(x['load_util'] for x in p.alloc[k]['summary'][:p.H]))
+        sel = f'{sel[0]}|{sel[1]}'
+    sv, ss = sel.split('|')
+    a, ab = p.alloc[(sv, ss)]['summary'][:p.H], pb.alloc.get((sv, ss), {'summary': [None] * p.H})['summary'][:p.H]
+    hw = p.hw_ready.get((sv, ss))
+    months = p.months
+
+    def tot(alloc, key, H):
+        return sum(x[key] for k in alloc for x in alloc[k]['summary'][:H])
+    short_now, short_base = R['home']['short'], Rb['home']['short']
+    gap_now, gap_base = tot(p.alloc, 'gap', p.H), tot(pb.alloc, 'gap', p.H)
+    left_now = sum(p.alloc[k]['summary'][p.H - 1]['late_left'] for k in p.alloc)
+    left_base = sum(pb.alloc[k]['summary'][p.H - 1]['late_left'] for k in pb.alloc)
+    cap_now = sum(x['total'] for k in p.alloc for x in p.alloc[k]['summary'][:p.H])
+    cap_base = sum(x['total'] for k in pb.alloc for x in pb.alloc[k]['summary'][:p.H])
+    lost_now = sum(l['revenue'] for l in R['pnl']['lost'])
+    lost_base = sum(l['revenue'] for l in Rb['pnl']['lost'])
+    counts = {k: len(t.get(k, [])) for k in OVERRIDE_TABLES}
+    kp = [
+        K('Overrides entered', str(sum(counts.values())), f'{counts["fleet_changes"]} tester · {counts["hardware_arrivals"]} hardware · '
+          f'{counts["capacity_overrides"]} test time · {counts["yield_overrides"]} yield', 'info'),
+        K('Customer shortfall', f'{short(short_now) if short_now > 0.5 else "None"}', f'without overrides: {short(short_base) if short_base > 0.5 else "none"}',
+          'bad' if short_now > 0.5 else 'ok'),
+        K('Test units made late', short(gap_now) if gap_now > 0.5 else 'None', f'without overrides: {short(gap_base)}', 'warn' if gap_now > 0.5 else 'ok'),
+        K('Still owed at horizon end', short(left_now) if left_now > 0.5 else 'None', f'without overrides: {short(left_base)}', 'bad' if left_now > 0.5 else 'ok'),
+        K('Tester capacity added', f'{cap_now - cap_base:+,.0f}', 'tester-months over the horizon, all OSATs'),
+        K('Revenue protected', money(max(0.0, lost_base - lost_now)), 'lost revenue avoided by the overrides', 'ok' if lost_base - lost_now > 0.5 else ''),
+    ]
+    if not p.apply:
+        kp.insert(0, K('Overrides are OFF', 'Baseline', 'every module is planning without overrides', 'warn'))
+    # capacity timeline chart for the selected OSAT and step
+    cons = [x['consignee'] for x in a]
+    ncon = [x['non_consignee'] for x in a]
+    need = [x['needed'] for x in a]
+    base_tot = [x['total'] if x else 0 for x in ab]
+    chart_html = charts.bars(months, [('Consignee testers', cons), ('Non-consignee testers', ncon)],
+                             lines=[('Testers needed (load)', need), ('Testers without overrides', base_tot)],
+                             title='Tester capacity timeline')
+    rows = [
+        {'label': 'Overrides this month', 'cells': [('; '.join(x['events']) if x['events'] else '', 'ev' if x['events'] else '') for x in a]},
+        {'label': 'Testers without overrides', 'cells': [(f'{x["consignee"]}+{x["non_consignee"]}' if x else '–', '') for x in ab]},
+        {'label': 'Testers with overrides', 'cells': [(f'{x["consignee"]}+{x["non_consignee"]}', 'info' if b and x['total'] != b['total'] else '') for x, b in zip(a, ab)], 'strong': True},
+    ]
+    if hw:
+        rows.append({'label': 'Consignee testers with a full hardware kit', 'cells': [cell(hw[i], 'bad' if hw[i] < a[i]['fleet_consignee'] else 'ok', 'int') for i in range(p.H)]})
+    rows += [
+        {'label': 'Testers needed (load)', 'cells': [cell(x['needed'], '', 'num1') for x in a]},
+        {'label': 'Load % without overrides', 'cells': [cell(x['load_util'], util_tone(x['load_util']), 'pct') if x else ('–', '') for x in ab]},
+        {'label': 'Load % with overrides', 'cells': [cell(x['load_util'], util_tone(x['load_util']), 'pct') for x in a], 'strong': True},
+        {'label': 'Pull-in built (with overrides)', 'cells': [cell(x['pullin'], 'info' if x['pullin'] > 0.5 else '') for x in a]},
+        {'label': 'Made late, without overrides', 'cells': [cell(x['gap'], 'bad' if x['gap'] > 0.5 else '') if x else ('–', '') for x in ab]},
+        {'label': 'Made late, with overrides', 'cells': [cell(x['gap'], 'bad' if x['gap'] > 0.5 else '') for x in a]},
+        {'label': 'Still owed, with overrides', 'cells': [cell(x['late_left'], 'warn' if x['late_left'] > 0.5 else '') for x in a]},
+    ]
+    per_sku = []
+    for sku in sorted(p.alloc[(sv, ss)]['upm']):
+        u = p.alloc[(sv, ss)]['upm'][sku][:p.H]
+        per_sku.append({'label': f'{sku}: units per tester-month', 'cells': [cell(v, 'info' if i and abs(v - u[i - 1]) > 1 else '') for i, v in enumerate(u)]})
+    timeline = grid(f'OSAT-{sv} · {ss}: capacity with and without overrides', months,
+                    [{'title': '', 'rows': rows}, {'title': 'Throughput (changes with test-time, sites and OEE overrides)', 'rows': per_sku}],
+                    'Testers shown as consignee + non-consignee. Blue cells: changed by an override.')
+    impact = []
+    for k in keys:
+        s_now, s_b = p.alloc[k]['summary'][:p.H], pb.alloc.get(k, {'summary': []})['summary'][:p.H]
+        impact.append({'res': f'OSAT-{k[0]} · {k[1]}', 'key': f'{k[0]}|{k[1]}',
+                       'cap_b': sum(x['total'] for x in s_b), 'cap_n': sum(x['total'] for x in s_now),
+                       'peak_b': max([x['load_util'] for x in s_b] or [0]), 'peak_n': max(x['load_util'] for x in s_now),
+                       'gap_b': sum(x['gap'] for x in s_b), 'gap_n': sum(x['gap'] for x in s_now),
+                       'pull_b': sum(x['pullin'] for x in s_b), 'pull_n': sum(x['pullin'] for x in s_now),
+                       'changes': sum(len(x['events']) for x in s_now)})
+    cust = []
+    for sku in sorted(p.products):
+        sn = sum(max(fg['short'][:p.H]) for (s_, v), fg in p.fg.items() if s_ == sku)
+        sb = sum(max(fg['short'][:p.H]) for (s_, v), fg in pb.fg.items() if s_ == sku)
+        if sn > 0.5 or sb > 0.5:
+            cust.append({'sku': sku, 'base': sb, 'now': sn, 'delta': sn - sb})
+    forms = override_forms(R, ws)
+    return page('overrides', [], extra={'template': 'overrides.html', 'kpis': kp, 'chart': chart_html, 'timeline': timeline,
+                                        'impact': impact, 'cust': cust, 'sel': sel, 'keys': [f'{v}|{s}' for v, s in keys],
+                                        'forms': forms, 'apply': p.apply, 'hw_limit': p.hw_limit})
+
+
+def override_forms(R, ws):
+    p = R['plan']
+    t = ws['tables']
+    vendors = sorted({r['Vendor'] for r in t['vendors']})
+    skus = sorted(p.products)
+    months = p.months_x
+    hw_types = sorted({r['HardwareType'] for r in t['hardware']})
+    cur = {}
+    for (v, sku, st), c in p.cap.items():
+        cur[f'{v}|{sku}|{st}'] = {k: c[k] for k in ('TestTimeSec', 'Sites', 'IndexTimeSec', 'OEE')}
+    flow = {f'{r["SKU"]}|{r["Operation"]}': {'Yield': r['Yield'], 'ReworkRate': r['ReworkRate']} for r in t['process_flow']}
+    return {'vendors': vendors, 'skus': skus, 'months': months, 'hw_types': hw_types, 'current': cur, 'flow': flow,
+            'rows': {k: list(enumerate(t.get(k, []))) for k in OVERRIDE_TABLES}}

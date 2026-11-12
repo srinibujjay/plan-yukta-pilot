@@ -43,6 +43,13 @@ FAQ = [
      'testers in earlier months (pull-in), within the pull-in horizon and the product service level, and makes the rest late '
      '(catch-up). Fixes: add a fleet change, raise OEE, cut test time (more sites), allow non-consignee testers, or move volume '
      'to another OSAT by changing vendor shares.'),
+    ('Tester and hardware overrides (future capacity)',
+     'Future changes go on the Tester & Capacity Overrides page (sidebar, Capacity & engineering): tester arrivals or removals '
+     '(consignee / non-consignee, from a month), hardware arrivals (sockets, load boards, probe and instrument cards), test time / '
+     'sites / index / OEE changes from a month, and yield changes. Each applies from its month onwards. The page shows capacity, '
+     'load %, pull-in, units made late and customer shortfall with and without the overrides, per OSAT and step. "Overrides off" '
+     'shows the baseline plan in every module. In the demo, two testers arrive at OSAT-A Test1 in July 2027 and a faster ORION '
+     'test program starts in May; without them customers would be about 2.8M units short.'),
     ('Pull-in and service level',
      'Pull-in uses idle tester time in earlier months to build ahead for a later shortfall. The share of the shortfall that may '
      'be built early is min(service level %, max pull-in %) per product. It never goes further back than the pull-in horizon, or '
