@@ -2,33 +2,110 @@
 {% from '_macros.html' import head, about, render, filters with context %}
 {% block body %}
 {{ head(page) }}
-{{ about(page.info, key, ws, open=True) }}
+{% if not page.rows %}<div class="callout info">No products yet. Add one in <a href="/data/products">Products</a> or with the SKU Setup Wizard.</div>{% else %}
+{% set cur = page.rows|selectattr('sku', 'equalto', page.sel)|first %}
+<section class="panel" id="setup">
+  <div class="panel-head"><h2>Pull-in strategy setup</h2>
+    <div class="chips">{% for r in page.rows %}<a class="chip {{ 'on' if r.sku == page.sel }}" href="?sku_sel={{ r.sku }}#setup">{{ r.sku }} · {{ r.strategy }}</a>{% endfor %}</div></div>
+  <p class="sub">Move the sliders: the preview re-plans {{ page.sel }} across every OSAT live, against the saved settings. Nothing changes until you save.</p>
+  <form method="post" action="/pullin/save-one" id="pi-form">
+    <input type="hidden" name="sku" value="{{ page.sel }}">
+    <div class="pi-grid">
+      <div class="pi-ctl">
+        <div class="pi-row"><label for="pi-weight">Pull-in weight</label><output id="pi-weight-v" class="pi-val"></output></div>
+        <input type="range" id="pi-weight" name="weight" min="-0.10" max="0.05" step="0.01" value="{{ '%.2f'|format(cur.weight) }}">
+        <div class="pi-scale"><span>−0.10 aggressive</span><span>0 neutral</span><span>+0.05 avoid</span></div>
+      </div>
+      <div class="pi-ctl">
+        <div class="pi-row"><label for="pi-sl">Service level</label><output id="pi-sl-v" class="pi-val"></output></div>
+        <input type="range" id="pi-sl" name="sl" min="0" max="100" step="5" value="{{ cur.sl|round(0)|int }}">
+        <div class="pi-scale"><span>0% none</span><span>50% moderate</span><span>100% full cover</span></div>
+      </div>
+      <div class="pi-ctl">
+        <div class="pi-row"><label for="pi-max">Max pull-in (cash cap)</label><output id="pi-max-v" class="pi-val"></output></div>
+        <input type="range" id="pi-max" name="max" min="0" max="100" step="5" value="{{ cur.max|round(0)|int }}">
+        <div class="pi-scale"><span>0% no inventory</span><span>50%</span><span>100% full</span></div>
+      </div>
+      <div class="pi-ctl pi-toggles">
+        <label>Pull-in<select name="pull" id="pi-pull"><option value="Y" {{ 'selected' if cur.pull == 'Y' }}>On</option><option value="N" {{ 'selected' if cur.pull != 'Y' }}>Off</option></select></label>
+        <label>Build strategy<select name="build" id="pi-build">{% for b in ['FORECAST', 'ORDERS', 'STAT', 'BLEND'] %}<option {{ 'selected' if cur.build == b }}>{{ b }}</option>{% endfor %}</select></label>
+        <label>Non-consignee testers (all products)<select name="nc" id="pi-nc"><option value="Y" {{ 'selected' if page.allow_nc == 'Y' }}>Allowed</option><option value="N" {{ 'selected' if page.allow_nc != 'Y' }}>Not allowed</option></select></label>
+      </div>
+    </div>
+    <div class="actions" style="margin-top:10px"><button class="btn" type="submit">Save {{ page.sel }} strategy &amp; re-plan</button>
+      <button class="btn ghost" type="button" id="pi-reset">Back to saved values</button><span class="muted small" id="pi-status"></span></div>
+  </form>
+  <div id="pi-preview">{{ page.preview|safe }}</div>
+</section>
+
+{% endif %}
+{{ about(page.info, key, ws) }}
+
 <form method="post" action="/pullin/save">
 <section class="panel">
-  <div class="panel-head"><h2>Pull-in strategy by product</h2>
+  <div class="panel-head"><h2>All products</h2>
     <label>Pull-in horizon (months ahead) <input type="number" name="horizon" value="{{ page.horizon }}" min="0" max="12" step="1" style="width:70px"></label></div>
-  <p class="sub">The smaller of service level and max pull-in % is the share of a future tester shortfall that may be built early. Priority decides who gets scarce testers first.</p>
+  <p class="sub">Effective cap = min(service level, max pull-in) × weight intensity: the share of a future tester shortfall that may be built early. Priority decides who gets scarce testers first.</p>
   <div class="tablewrap"><table>
-    <thead><tr><th>Product</th><th>Pull-in</th><th class="r">Service level %</th><th class="r">Max pull-in %</th><th class="r">Effective cap</th>
-      <th class="r">Priority</th><th class="r">Safety stock (weeks)</th><th class="r">Built early</th><th class="r">Shortfall covered</th><th class="r">Still short (made late)</th></tr></thead>
+    <thead><tr><th>Product</th><th>Strategy</th><th>Pull-in</th><th class="r">Weight</th><th class="r">Service level %</th><th class="r">Max pull-in %</th><th class="r">Effective cap</th>
+      <th class="r">Priority</th><th class="r">Safety stock (wk)</th><th class="r">Built early</th><th class="r">Covered</th><th class="r">Made late</th></tr></thead>
     <tbody>
     {% for r in page.rows %}<tr>
       <td><b>{{ r.sku }}</b></td>
+      <td><span class="badge {{ {'Aggressive': 'bad', 'Moderate': 'warn', 'Conservative': 'ok', 'Neutral': 'info'}.get(r.strategy, '') }}">{{ r.strategy }}</span></td>
       <td><select name="pull_{{ r.sku }}"><option value="Y" {{ 'selected' if r.pull == 'Y' }}>On</option><option value="N" {{ 'selected' if r.pull != 'Y' }}>Off</option></select></td>
-      <td class="r"><input type="number" name="sl_{{ r.sku }}" value="{{ r.sl|round(0)|int }}" min="0" max="100" style="width:80px"></td>
-      <td class="r"><input type="number" name="max_{{ r.sku }}" value="{{ r.max|round(0)|int }}" min="0" max="100" style="width:80px"></td>
+      <td class="r"><input type="number" name="w_{{ r.sku }}" value="{{ '%.2f'|format(r.weight) }}" min="-0.10" max="0.05" step="0.01" style="width:78px"></td>
+      <td class="r"><input type="number" name="sl_{{ r.sku }}" value="{{ r.sl|round(0)|int }}" min="0" max="100" style="width:70px"></td>
+      <td class="r"><input type="number" name="max_{{ r.sku }}" value="{{ r.max|round(0)|int }}" min="0" max="100" style="width:70px"></td>
       <td class="r mono">{{ r.cap|round(0)|int }}%</td>
-      <td class="r"><input type="number" name="prio_{{ r.sku }}" value="{{ r.prio }}" min="0" max="10" style="width:64px"></td>
-      <td class="r"><input type="number" name="ss_{{ r.sku }}" value="{{ r.ss }}" min="0" max="26" step="0.5" style="width:70px"></td>
+      <td class="r"><input type="number" name="prio_{{ r.sku }}" value="{{ r.prio }}" min="0" max="10" style="width:60px"></td>
+      <td class="r"><input type="number" name="ss_{{ r.sku }}" value="{{ r.ss }}" min="0" max="26" step="0.5" style="width:64px"></td>
       <td class="r mono">{{ r.pulled|short }}</td><td class="r mono">{{ r.covered|short }}</td>
       <td class="r mono" style="{{ 'color:var(--bad);font-weight:600' if r.left > 0.5 }}">{{ r.left|short }}</td>
     </tr>{% endfor %}
     </tbody></table></div>
-  <div class="actions" style="margin-top:12px"><button class="btn" type="submit">Save &amp; re-plan</button><a class="btn ghost" href="/m/testing">See the effect in Testing Starts</a></div>
+  <div class="actions" style="margin-top:12px"><button class="btn" type="submit">Save all &amp; re-plan</button><a class="btn ghost" href="/m/testing">See the effect in Testing Starts</a></div>
 </section>
 </form>
 <h2 style="margin:22px 0 10px">Pull-in production plan</h2>
 {{ filters(page.filters, args) }}
 {% for s in page.sections %}{{ render(s) }}{% endfor %}
 <div class="actions"><a class="btn ghost" href="/m/overrides">Change future capacity on Tester &amp; Capacity Overrides →</a></div>
+{% endblock %}
+{% block scripts %}
+<script>
+(function () {
+  const f = document.getElementById('pi-form'), prev = document.getElementById('pi-preview'), st = document.getElementById('pi-status');
+  const saved = new FormData(f), ids = ['weight', 'sl', 'max'];
+  const label = w => w > 0.0001 ? 'avoid' : (Math.abs(w) < 0.0001 ? 'neutral' : (w <= -0.08 ? 'aggressive' : (w <= -0.04 ? 'moderate' : 'conservative')));
+  function show() {
+    const w = parseFloat(f.weight.value);
+    document.getElementById('pi-weight-v').textContent = (w > 0 ? '+' : '') + w.toFixed(2) + ' · ' + label(w);
+    document.getElementById('pi-sl-v').textContent = f.sl.value + '%';
+    document.getElementById('pi-max-v').textContent = f.max.value + '%';
+  }
+  let timer = null, seq = 0;
+  function preview() {
+    show();
+    clearTimeout(timer);
+    timer = setTimeout(async () => {
+      const my = ++seq;
+      st.textContent = 'Re-planning…';
+      const body = Object.fromEntries(new FormData(f).entries());
+      try {
+        const r = await fetch('/api/pullin/preview', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        const d = await r.json();
+        if (my !== seq) return;
+        if (d.html) { prev.innerHTML = d.html; st.textContent = 'Preview updated (not saved)'; } else { st.textContent = d.error || 'Preview failed'; }
+      } catch (e) { st.textContent = 'Could not reach the server'; }
+    }, 250);
+  }
+  f.querySelectorAll('input[type=range], select').forEach(el => el.addEventListener('input', preview));
+  document.getElementById('pi-reset').addEventListener('click', () => {
+    for (const [k, v] of saved.entries()) { if (f.elements[k]) f.elements[k].value = v; }
+    preview();
+  });
+  show();
+})();
+</script>
 {% endblock %}

@@ -18,12 +18,12 @@ PLAN_MONTHS = [f'{2026 + (10 + i) // 12}-{(10 + i) % 12 + 1:02d}' for i in range
 HIST_MONTHS = [f'{2024 + (10 + i) // 12}-{(10 + i) % 12 + 1:02d}' for i in range(24)]   # 2024-11 .. 2026-10
 
 PRODUCTS = [
-    # SKU, desc, pkg, status, gdpw, prio, strategy, ss_wk, pullin, sl, maxpull, wafer$, material, npi start
-    ('ORION', 'Power management IC', 'QFN-32', 'HVM', 9000, 8, 'FORECAST', 2, 'Y', 90, 60, 850, 'Leadframe', None),
-    ('VEGA', 'Sensor hub', 'WLCSP-25', 'HVM', 24000, 6, 'FORECAST', 2, 'Y', 80, 50, 760, 'None', None),
-    ('LYRA', 'Connectivity SoC', 'BGA-196', 'HVM', 7400, 9, 'BLEND', 3, 'Y', 100, 80, 980, 'Substrate', None),
-    ('ATLAS', 'Legacy driver IC', 'QFN-16', 'EOL', 9000, 2, 'ORDERS', 0, 'N', 0, 0, 700, 'Leadframe', None),
-    ('NOVA', 'Next-gen PMIC (new)', 'WLCSP-36', 'NPI', 9400, 7, 'FORECAST', 2, 'N', 80, 50, 1020, 'None', '2026-12-01'),
+    # SKU, desc, pkg, status, gdpw, prio, strategy, ss_wk, pullin, sl, maxpull, wafer$, material, npi start, pull-in weight
+    ('ORION', 'Power management IC', 'QFN-32', 'HVM', 9000, 8, 'FORECAST', 2, 'Y', 90, 60, 850, 'Leadframe', None, -0.05),
+    ('VEGA', 'Sensor hub', 'WLCSP-25', 'HVM', 24000, 6, 'FORECAST', 2, 'Y', 80, 50, 760, 'None', None, -0.1),
+    ('LYRA', 'Connectivity SoC', 'BGA-196', 'HVM', 7400, 9, 'BLEND', 3, 'Y', 100, 80, 980, 'Substrate', None, -0.08),
+    ('ATLAS', 'Legacy driver IC', 'QFN-16', 'EOL', 9000, 2, 'ORDERS', 0, 'N', 0, 0, 700, 'Leadframe', None, 0.02),
+    ('NOVA', 'Next-gen PMIC (new)', 'WLCSP-36', 'NPI', 9400, 7, 'FORECAST', 2, 'N', 80, 50, 1020, 'None', '2026-12-01', -0.02),
 ]
 
 FLOWS = {   # operation: (yield, rework, cycle days)
@@ -76,7 +76,7 @@ def build() -> dict:
     t['settings'] = [{'Setting': k, 'Value': v[1], 'Notes': v[2]} for k, v in SETTINGS.items()]
     t['products'] = [dict(SKU=p[0], Description=p[1], Package=p[2], Status=p[3], GDPW=p[4], Priority=p[5],
                           BuildStrategy=p[6], SafetyStockWeeks=p[7], PullIn=p[8], ServiceLevelPct=p[9],
-                          MaxPullInPct=p[10], WaferPriceUSD=p[11], SubstrateType=p[12], NPIStartDate=p[13])
+                          MaxPullInPct=p[10], WaferPriceUSD=p[11], SubstrateType=p[12], NPIStartDate=p[13], PullInWeight=p[14])
                      for p in PRODUCTS]
     t['process_flow'] = [dict(SKU=s, Operation=op, Step=i + 1, Yield=y, ReworkRate=rw, CycleTimeDays=ct)
                          for s, flow in FLOWS.items() for i, (op, y, rw, ct) in enumerate(flow)]

@@ -34,6 +34,7 @@ ICONS = {
     'gear': 'M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6zM19 12l2-1-1-3-2 .3-1.5-1.5L17 4l-3-1-1 2h-2l-1-2-3 1 .5 2.8L6 8.3 4 8l-1 3 2 1v0l-2 1 1 3 2-.3 1.5 1.5L7 20l3 1 1-2h2l1 2 3-1-.5-2.8 1.5-1.5 2 .3 1-3z',
     'help': 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM9.5 9a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6V14M12 17v.5',
     'tour': 'M5 3v18M5 4h11l-2 4 2 4H5',
+    'dash': 'M4 4h7v7H4zM13 4h7v4h-7zM13 10h7v10h-7zM4 13h7v7H4z',
     'override': 'M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0M14 4v4M8 10v4M16 16v4',
 }
 
@@ -42,15 +43,17 @@ NAV = [
     ('home', None, 'Cockpit', 'home'),
     ('demand', 'Planning modules', 'Demand & Forecast', 'demand'),
     ('testing', 'Planning modules', 'M1 · Testing Starts', 'test'),
-    ('pullin', 'Planning modules', 'Pull-in & Service Level', 'pullin'),
+    ('m1-dashboard', 'Planning modules', 'Dashboard', 'dash'),
+    ('pullin', 'Planning modules', 'Pull-in Setup', 'pullin'),
     ('assembly', 'Planning modules', 'M2 · Assembly Starts', 'assembly'),
     ('frontend', 'Planning modules', 'M3 · Front End & Wafers', 'wafer'),
     ('flow', 'Planning modules', 'M4 · Complete Flow', 'flow'),
+    ('flow-dashboard', 'Planning modules', 'Dashboard', 'dash'),
     ('atp', 'Planning modules', 'M5 · Available to Promise', 'atp'),
     ('overrides', 'Capacity & engineering', 'Tester & Capacity Overrides', 'override'),
     ('testers', 'Capacity & engineering', 'Tester Capacity', 'gauge'),
     ('hardware', 'Capacity & engineering', 'Hardware Readiness', 'tool'),
-    ('ate', 'Capacity & engineering', 'ATE Economics', 'econ'),
+    ('ate', 'Capacity & engineering', 'ATE Economics & Dashboard', 'econ'),
     ('npi', 'Capacity & engineering', 'NPI Management', 'npi'),
     ('fab-po', 'Procurement & B2B', 'FAB PO Schedule', 'fab'),
     ('osat-po', 'Procurement & B2B', 'OSAT PO Schedule', 'osat'),
@@ -70,6 +73,8 @@ NAV = [
     ('tour', 'Help', 'Demo Tour', 'tour'),
     ('method', 'Help', 'How It Calculates', 'help'),
 ]
+
+SUB = {'m1-dashboard', 'pullin', 'flow-dashboard'}   # shown indented under the module above them
 
 GROUP_ORDER = ['Planning modules', 'Capacity & engineering', 'Procurement & B2B', 'Analytics & monitoring', 'Data & setup', 'Help']
 
@@ -105,15 +110,29 @@ INFO = {
         tryit=['In Tester fleet, cut OSAT-A Test1 consignee testers from 6 to 4 and save: watch shortfalls, pull-in and customer shortages appear.',
                'Set "Allow non-consignee testers" to N in Plan settings to plan on your own testers only.',
                'Raise ORION Test1 yield to 0.95 in Process flow and see the test load drop.']),
+    'm1-dashboard': dict(
+        title='Module 1 Dashboard',
+        summary='Analytics for the testing plan: gaps, pull-in, forecast achievement, production by OSAT, root cause and a month-by-month recovery plan.',
+        what='Filter by product, OSAT and step. The insights and the recovery plan are worked out from the plan itself: which tester step causes the shortfall, which products lose testers, how much pull-in covered, and for each short month whether another qualified OSAT has idle testers to take the load or a tester should be added.',
+        how=['Forecast achievement = demand shipped on time ÷ demand.',
+             'Recovery action: if another OSAT qualified for the product has idle testers that month covering at least 30% of the gap, move the load there; otherwise add ⌈gap ÷ units per tester-month⌉ testers.',
+             'Vendor split optimisation spreads each product\'s Test 1 shortfall over the OSATs with idle capacity, in proportion to that idle capacity.'],
+        tables=['tester_fleet', 'tester_capacity', 'vendors', 'products']),
+    'flow-dashboard': dict(
+        title='Module 4 Dashboard',
+        summary='The complete flow at a glance: output by OSAT and product, starts by process and month, wafers, and fill rate by product.',
+        tables=['forecast', 'process_flow', 'osat_wip']),
     'pullin': dict(
-        title='Pull-in & Service Level',
-        summary='How much inventory you are willing to build ahead when testers are short later, product by product.',
+        title='Pull-in Setup',
+        summary='How much you are willing to build ahead when testers are short later, product by product, with a live preview of gap, pull-in and stock.',
         what='Pull-in trades cash for delivery: testing early when testers are idle avoids a later shortfall but holds inventory longer. Each product has a switch (PullIn), a service level (how much of a future shortfall to cover) and a max pull-in % (a cash cap). The smaller of the two applies. The pull-in horizon in Plan settings limits how far ahead you build, which limits obsolescence risk.',
-        how=['Pull-in units for a shortfall month = min(service level, max pull-in %) × shortfall, filled from the latest earlier month first.',
+        how=['Pull-in weight sets the appetite: −0.10 aggressive (100% of the cap), −0.05 moderate (63%), −0.02 conservative (40%), 0 neutral (25%, own idle testers only), positive = avoid pull-in. From −0.05 down, paid non-consignee tester time may also be used to build ahead.',
+             'Pull-in units for a shortfall month = min(service level, max pull-in %) × weight intensity × shortfall, filled from the latest earlier month first.',
              'Pull-in never goes earlier than the material lead time: a start must still be buildable from new wafers.',
              'Holding cost is not charged in the pilot; pulled-in units show in Testing Starts as "Pull-in" and in Complete Flow as extra finished goods.'],
         tables=['products', 'settings'],
-        tryit=['Set VEGA PullIn to N and save: its spring shortfall is then made late (catch-up) instead of early.',
+        tryit=['Pick VEGA and drag the pull-in weight from −0.10 to +0.03: pull-in falls from 224k to none and the gap doubles.',
+               'Set VEGA PullIn to N and save: its spring shortfall is then made late (catch-up) instead of early.',
                'Raise VEGA MaxPullInPct to 100 to cover the whole shortfall early.']),
     'assembly': dict(
         title='Module 2 · Assembly Starts',

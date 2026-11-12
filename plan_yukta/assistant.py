@@ -53,7 +53,10 @@ FAQ = [
     ('Pull-in and service level',
      'Pull-in uses idle tester time in earlier months to build ahead for a later shortfall. The share of the shortfall that may '
      'be built early is min(service level %, max pull-in %) per product. It never goes further back than the pull-in horizon, or '
-     'earlier than material can be built (the fab start lead time). Edit it on Pull-in & Service Level.'),
+     'earlier than material can be built (the fab start lead time). The pull-in weight per product scales it: -0.10 aggressive '
+     '(100% of the cap), -0.05 moderate (63%, may use non-consignee testers), -0.02 conservative (40%), 0 neutral (25%, own testers '
+     'only), positive = avoid. Pull-in Setup has sliders with a live preview of total gap, pull-in production, forecast '
+     'achievement and build-ahead stock. The Module 1 Dashboard shows root cause and a monthly recovery plan.'),
     ("Holt's method",
      "Holt is not a typo. Holt's linear trend method (Charles C. Holt, 1957) is a standard exponential smoothing forecast that "
      'tracks a level and a trend. Alpha weights the latest level and beta the latest trend. WMAPE and bias are measured on '

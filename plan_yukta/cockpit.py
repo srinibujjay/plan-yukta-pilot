@@ -77,6 +77,34 @@ def holt(series, alpha, beta, horizon):
     return fitted, [max(0.0, level + (h + 1) * trend) for h in range(horizon)]
 
 
+DEFAULT_WEIGHT = -0.02
+
+
+def pullin_intensity(weight):
+    """
+    Pull-in weight (per product) -> (share of the pull-in cap used, may it use non-consignee testers).
+      positive (up to +0.05): avoid pull-in entirely; shortfalls are made late.
+      0: neutral, 25% of the cap and only on your own idle (consignee) testers.
+      negative: 25% + 75% x |weight| / 0.10 of the cap (-0.02 -> 40%, -0.05 -> 63%, -0.10 -> 100%);
+                from -0.05 down, paid non-consignee tester time may also be used to build ahead.
+    """
+    w = DEFAULT_WEIGHT if weight is None else float(weight)
+    if w > 1e-9:
+        return 0.0, False
+    if abs(w) <= 1e-9:
+        return 0.25, False
+    return min(1.0, 0.25 + 0.75 * abs(w) / 0.10), w <= -0.05 + 1e-9
+
+
+def strategy_label(weight, pull='Y'):
+    w = DEFAULT_WEIGHT if weight is None else float(weight)
+    if pull != 'Y' or w > 1e-9:
+        return 'Avoid'
+    if abs(w) <= 1e-9:
+        return 'Neutral'
+    return 'Aggressive' if w <= -0.08 + 1e-9 else ('Moderate' if w <= -0.04 + 1e-9 else 'Conservative')
+
+
 @dataclass
 class Chain:
     """One product at one OSAT vendor."""
@@ -410,7 +438,7 @@ class Plan:
                    'late_left': [0.0] * H} for k in skus}
         idle_c, idle_n = [float(x) for x in cc], [float(x) for x in nn]
 
-        def give(k, m, units):
+        def give(k, m, units, allow_n=True):
             """Use idle tester time in month m for product k; returns units made."""
             r, u = res[k], upm[k][m]
             if u <= 0:
@@ -418,7 +446,7 @@ class Plan:
             want = units / u
             a_c = min(want, idle_c[m])
             idle_c[m] -= a_c
-            a_n = min(want - a_c, idle_n[m])
+            a_n = min(want - a_c, idle_n[m]) if allow_n else 0.0
             idle_n[m] -= a_n
             r['tc'][m] += a_c
             r['tn'][m] += a_n
@@ -440,7 +468,10 @@ class Plan:
             p = self.products[k]
             if p['PullIn'] != 'Y' or max(upm[k]) <= 0:
                 continue
-            cap_share = min(float(p['ServiceLevelPct']), float(p['MaxPullInPct'])) / 100.0
+            intensity, allow_n = pullin_intensity(p.get('PullInWeight'))
+            cap_share = min(float(p['ServiceLevelPct']), float(p['MaxPullInPct'])) / 100.0 * intensity
+            if cap_share <= 0:
+                continue
             lo = earliest.get(k, 0)
             for g in range(H):
                 gap = res[k]['gap'][g]
@@ -450,7 +481,7 @@ class Plan:
                 for m in range(g - 1, max(lo, g - self.pull_h) - 1, -1):
                     if budget <= EPS or m < 0:
                         break
-                    made = give(k, m, budget)
+                    made = give(k, m, budget, allow_n)
                     if made > EPS:
                         budget -= made
                         res[k]['pullin'][m] += made

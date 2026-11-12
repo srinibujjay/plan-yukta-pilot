@@ -184,3 +184,35 @@ def flow_diagram(stages):
             out.append(f'<path class="farrow" d="M{ax:.1f},53 l9,0 m-4,-4 l4,4 l-4,4"/>')
     out.append('</svg>')
     return '<figure class="fig">' + ''.join(out) + '</figure>'
+
+
+def donut(items, title='', unit=''):
+    """items: [(label, value)] drawn as a donut with a legend."""
+    import math
+    tot = sum(max(0, v) for _, v in items) or 1
+    W, H, cx, cy, r, w = 430, max(200, 40 + 24 * len(items)), 95, 100, 85, 26
+    out = [f'<svg class="chart" viewBox="0 0 {W} {H}" role="img" aria-label="{escape(title)}">']
+    a0 = -math.pi / 2
+    for i, (lab, v) in enumerate(items):
+        v = max(0, v)
+        if v <= 0:
+            continue
+        a1 = a0 + 2 * math.pi * v / tot
+        if v >= tot - 1e-9:
+            a1 = a0 + 2 * math.pi - 1e-4
+        large = 1 if a1 - a0 > math.pi else 0
+        x0, y0, x1, y1 = cx + r * math.cos(a0), cy + r * math.sin(a0), cx + r * math.cos(a1), cy + r * math.sin(a1)
+        ri = r - w
+        xi1, yi1, xi0, yi0 = cx + ri * math.cos(a1), cy + ri * math.sin(a1), cx + ri * math.cos(a0), cy + ri * math.sin(a0)
+        out.append(f'<path class="seg {PALETTE[i % 8]}" d="M{x0:.1f},{y0:.1f} A{r},{r} 0 {large} 1 {x1:.1f},{y1:.1f} L{xi1:.1f},{yi1:.1f} '
+                   f'A{ri},{ri} 0 {large} 0 {xi0:.1f},{yi0:.1f} Z"><title>{escape(lab)}: {v:,.0f}{unit} ({v / tot * 100:.1f}%)</title></path>')
+        a0 = a1
+    out.append(f'<text class="dn-v" x="{cx}" y="{cy + 2}" text-anchor="middle">{_fmt(tot)}</text>'
+               f'<text class="ax" x="{cx}" y="{cy + 20}" text-anchor="middle">total{escape(unit)}</text>')
+    for i, (lab, v) in enumerate(items):
+        y = 36 + i * 24
+        out.append(f'<rect class="{PALETTE[i % 8]}" x="205" y="{y - 10}" width="12" height="12" rx="3"/>'
+                   f'<text class="dn-l" x="224" y="{y}">{escape(lab)}</text>'
+                   f'<text class="dn-n" x="426" y="{y}" text-anchor="end">{_fmt(v)} · {max(0, v) / tot * 100:.0f}%</text>')
+    out.append('</svg>')
+    return '<figure class="fig">' + ''.join(out) + '</figure>'

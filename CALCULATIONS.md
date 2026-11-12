@@ -73,7 +73,19 @@ Yield overrides (per vendor, from a month) replace the process-flow yield and re
 **Allocation**, per OSAT, step and month, in tester-months:
 
 1. Products in priority order (highest first) get the tester time they need: consignee first, then non-consignee.
-2. **Pull-in.** For each later shortfall, idle tester time in earlier months builds ahead, latest month first, no more than the pull-in horizon back and never earlier than `fab start offset − step offset` months (material must still be buildable). The amount is capped at min(service level %, max pull-in %) × shortfall.
+2. **Pull-in.** For each later shortfall, idle tester time in earlier months builds ahead, latest month first, no more than the pull-in horizon back and never earlier than `fab start offset − step offset` months (material must still be buildable). The amount is capped at min(service level %, max pull-in %) × weight intensity × shortfall.
+
+   **Pull-in weight** (per product, Pull-in Setup) sets the appetite for building ahead:
+
+   | Weight | Strategy | Share of the cap used | Testers it may use |
+   |---|---|---|---|
+   | −0.10 … −0.08 | Aggressive | 25% + 75% × \|w\| ÷ 0.10 → up to 100% | consignee, then non-consignee |
+   | −0.07 … −0.04 | Moderate | 55% – 78% | consignee, then non-consignee from −0.05 |
+   | −0.03 … −0.01 | Conservative | 33% – 48% | consignee (own) only |
+   | 0 | Neutral | 25% | consignee (own) only |
+   | > 0 (up to +0.05) | Avoid | 0%: shortfalls are made late | none |
+
+   The Pull-in Setup preview re-plans the whole supply chain with the slider values and compares total gap, pull-in production, forecast achievement (demand shipped on time ÷ demand), peak build-ahead stock and customer shortfall with the saved settings.
 3. **Catch-up.** What is still short is made in the following months with idle tester time; it reaches customers late.
 
 Upstream steps are planned from the starts the testers can actually make, so a tester shortfall reduces material demand upstream instead of piling WIP in front of the tester.
@@ -148,7 +160,12 @@ Need = die into assembly, for products whose SubstrateType is not None. Batches 
 
 Moved quantity = step output at the source OSAT × rule %; logistics cost = moved ÷ 1,000 × cost per 1,000. Active rules from one OSAT and step must not exceed 100%. Cross flow is an overlay in the pilot: the tester plan does not re-route the load.
 
-## 15. Data checks
+## 15. Dashboards
+
+- **Module 1 Dashboard:** production by OSAT and product, gap vs pull-in by month, cumulative forecast / demand / shipments, tester-months used. Recovery action for a short month: if another OSAT qualified for the product has idle testers covering at least 30% of the gap, move the load there; otherwise add ⌈gap ÷ units per tester-month⌉ testers. Vendor split optimisation spreads each product's Test 1 shortfall over OSATs with idle capacity in the short months, in proportion to that capacity.
+- **Module 4 Dashboard:** output (Pack) by OSAT and product, starts by process and month, OSAT wafer starts against fab starts, fill rate by product.
+
+## 16. Data checks
 
 Errors and warnings that change or stop the plan: products without a flow or without qualified OSATs, test times without testers, bin fractions that do not add up to 1, unmapped WIP lots, missing prices, cross-flow rules over 100%, and references to unknown products or vendors.
 

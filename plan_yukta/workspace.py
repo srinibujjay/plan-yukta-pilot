@@ -65,6 +65,7 @@ TABLES = {
             C('PullIn', 'choice', choices=YN, help='Y = idle tester time in earlier months may build ahead for later shortfalls.'),
             C('ServiceLevelPct', 'num', 'Share of a future shortfall you are willing to build ahead for.', lo=0, hi=100),
             C('MaxPullInPct', 'num', 'Cap on pull-in as % of the shortfall it covers (cash control).', lo=0, hi=100),
+            C('PullInWeight', 'num', 'Pull-in appetite: -0.10 aggressive, -0.05 moderate, -0.02 conservative, 0 neutral (own idle testers only), positive = avoid pull-in.', lo=-0.10, hi=0.05, required=False),
             C('WaferPriceUSD', 'num', 'Foundry price per wafer.', lo=0),
             C('SubstrateType', 'choice', choices=['None', 'Leadframe', 'Substrate'], help='Assembly material that must be on hand.'),
             C('NPIStartDate', 'date', 'NPI only: date engineering wafers start.', required=False),

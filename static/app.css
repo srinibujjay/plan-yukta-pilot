@@ -342,3 +342,21 @@ details > summary { cursor: pointer; color: var(--accent2); font-size: 13px; mar
   .formgrid > * { grid-column: auto !important; }
   .btn { white-space: normal; text-align: left; }
 }
+/* pull-in setup sliders */
+.pi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); gap: 14px 22px; margin: 6px 0 4px; }
+.pi-ctl { background: var(--panel2); border: 1px solid var(--line); border-radius: 10px; padding: 11px 13px; }
+.pi-row { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px; }
+.pi-row label { font-weight: 600; color: var(--ink); font-size: 13px; }
+.pi-val { font: 600 13px "JetBrains Mono", monospace; color: var(--accent2); }
+.pi-ctl input[type=range] { width: 100%; accent-color: var(--accent); padding: 0; background: transparent; border: 0; }
+.pi-scale { display: flex; justify-content: space-between; font-size: 10.5px; color: var(--muted); margin-top: 2px; }
+.pi-toggles { display: grid; gap: 8px; }
+.pi-toggles label { display: flex; flex-direction: column; gap: 3px; }
+#pi-preview { margin-top: 14px; }
+.chart path.seg.c1 { fill: var(--c1); } .chart path.seg.c2 { fill: var(--c2); } .chart path.seg.c3 { fill: var(--c3); } .chart path.seg.c4 { fill: var(--c4); }
+.chart path.seg.c5 { fill: var(--c5); } .chart path.seg.c6 { fill: var(--c6); } .chart path.seg.c7 { fill: var(--c7); } .chart path.seg.c8 { fill: var(--c8); }
+.chart path.seg:hover { opacity: .82; }
+.chart .dn-v { fill: var(--ink); font: 600 20px "JetBrains Mono", monospace; }
+.chart .dn-l { fill: var(--ink2); font: 13px "Inter", sans-serif; } .chart .dn-n { fill: var(--muted); font: 12.5px "JetBrains Mono", monospace; }
+.insights { margin: 0; padding-left: 18px; } .insights li { margin-bottom: 7px; color: var(--ink2); } .insights b { color: var(--ink); }
+.nav-item.sub { padding-left: 34px; font-size: 12.6px; } .nav-item.sub svg { width: 15px; height: 15px; flex-basis: 15px; }

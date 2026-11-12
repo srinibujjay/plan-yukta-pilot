@@ -287,11 +287,18 @@ def pullin(R, args):
         pulls = sum(sum(ch.levels[op]['alloc']['pullin'][:p.H]) for ch in p.chains if ch.sku == sku for op in ('Test1', 'Test2') if op in ch.ops)
         gaps = sum(sum(ch.levels[op]['alloc']['gap'][:p.H]) for ch in p.chains if ch.sku == sku for op in ('Test1', 'Test2') if op in ch.ops)
         cov = sum(sum(ch.levels[op]['alloc']['covered'][:p.H]) for ch in p.chains if ch.sku == sku for op in ('Test1', 'Test2') if op in ch.ops)
+        from .cockpit import pullin_intensity, strategy_label, DEFAULT_WEIGHT
+        inten, nc = pullin_intensity(pr.get('PullInWeight'))
         rows.append({'sku': sku, 'pull': pr['PullIn'], 'sl': pr['ServiceLevelPct'], 'max': pr['MaxPullInPct'],
-                     'cap': min(float(pr['ServiceLevelPct']), float(pr['MaxPullInPct'])) if pr['PullIn'] == 'Y' else 0,
+                     'weight': pr.get('PullInWeight') if pr.get('PullInWeight') is not None else DEFAULT_WEIGHT,
+                     'strategy': strategy_label(pr.get('PullInWeight'), pr['PullIn']), 'build': pr['BuildStrategy'], 'nc': nc,
+                     'cap': min(float(pr['ServiceLevelPct']), float(pr['MaxPullInPct'])) * inten if pr['PullIn'] == 'Y' else 0,
                      'prio': pr['Priority'], 'ss': pr['SafetyStockWeeks'], 'pulled': pulls, 'covered': cov, 'left': gaps})
     sections = pullin_plan(R, args)
-    return page('pullin', sections, extra={'template': 'pullin.html', 'rows': rows, 'horizon': p.s['Pull-in horizon months']},
+    sel = args.get('sku_sel') if args.get('sku_sel') in p.products else (max(rows, key=lambda r: r['pulled'] + r['left'])['sku'] if rows else None)
+    preview = pullin_preview_html(R, R, sel) if sel else '<div class="callout info">Add a product in Products to set up pull-in.</div>'
+    return page('pullin', sections, extra={'template': 'pullin.html', 'rows': rows, 'horizon': p.s['Pull-in horizon months'],
+                                           'sel': sel, 'preview': preview, 'allow_nc': p.s['Allow non-consignee testers']},
                 filters=filter_spec(R))
 
 
@@ -913,6 +920,10 @@ def overrides(R, Rb, args, ws):
     p, pb = R['plan'], Rb['plan']
     t = ws['tables']
     keys = sorted(p.alloc, key=lambda k: (k[0], TEST_OPS.index(k[1])))
+    if not keys:
+        return page('overrides', [], extra={'template': 'overrides.html', 'kpis': [K('Nothing to plan', '–', 'add products and test times first', 'warn')],
+                                            'chart': '<p class="muted">No tester steps are planned yet.</p>', 'timeline': None, 'impact': [], 'cust': [],
+                                            'sel': '', 'keys': [], 'forms': override_forms(R, ws), 'apply': p.apply, 'hw_limit': p.hw_limit})
     sel = args.get('res')
     if sel not in [f'{v}|{s}' for v, s in keys]:
         sel = max(keys, key=lambda k: max(x['load_util'] for x in p.alloc[k]['summary'][:p.H]))
@@ -1010,3 +1021,290 @@ def override_forms(R, ws):
     flow = {f'{r["SKU"]}|{r["Operation"]}': {'Yield': r['Yield'], 'ReworkRate': r['ReworkRate']} for r in t['process_flow']}
     return {'vendors': vendors, 'skus': skus, 'months': months, 'hw_types': hw_types, 'current': cur, 'flow': flow,
             'rows': {k: list(enumerate(t.get(k, []))) for k in OVERRIDE_TABLES}}
+
+
+# ------------------------------------------------------------------ pull-in strategy live preview
+def sku_pullin_stats(R, sku):
+    p = R['plan']
+    H = p.H
+    gap, pull, catch, load = [0.0] * H, [0.0] * H, [0.0] * H, [0.0] * H
+    for ch in p.chains:
+        if ch.sku != sku:
+            continue
+        for op in ('Test1', 'Test2'):
+            if op in ch.ops:
+                a = ch.levels[op]['alloc']
+                for i in range(H):
+                    gap[i] += a['gap'][i]
+                    pull[i] += a['pullin'][i]
+                    catch[i] += a['catchup'][i]
+                    load[i] += a['load'][i]
+    dem, ship, shortv, fc = [0.0] * H, [0.0] * H, [0.0] * H, list(p.fc.get(sku, [0.0] * p.HX)[:H])
+    for (s, v), f in p.fg.items():
+        if s == sku:
+            for i in range(H):
+                dem[i] += f['demand'][i]
+                ship[i] += f['ship'][i]
+                shortv[i] += f['short'][i]
+    on_time = [d - max(0.0, sh - (shortv[i - 1] if i else 0.0)) for i, (d, sh) in enumerate(zip(dem, shortv))]
+    # build-ahead stock at test = cumulative (made - needed) when positive
+    made = [0.0] * H
+    for ch in p.chains:
+        if ch.sku == sku:
+            for op in ('Test1', 'Test2'):
+                if op in ch.ops:
+                    a = ch.levels[op]['alloc']
+                    c = 0.0
+                    for i in range(H):
+                        c += a['prod'][i] - a['load'][i]
+                        made[i] += max(0.0, c)
+    tot_dem = sum(dem)
+    return {'gap': gap, 'pull': pull, 'catch': catch, 'load': load, 'dem': dem, 'ship': ship, 'short': shortv, 'fc': fc,
+            'ahead': made, 'gap_total': sum(gap), 'pull_total': sum(pull), 'peak_ahead': max(made) if made else 0,
+            'achieve': (sum(ship) / tot_dem * 100) if tot_dem else 100.0,
+            'on_time': (sum(min(d, o) for d, o in zip(dem, on_time)) / tot_dem * 100) if tot_dem else 100.0,
+            'short_peak': max(shortv) if shortv else 0.0}
+
+
+def pullin_preview_html(R_saved, R_new, sku):
+    from .cockpit import strategy_label, pullin_intensity
+    a, b = sku_pullin_stats(R_saved, sku), sku_pullin_stats(R_new, sku)
+    p = R_new['plan']
+    pr = p.products[sku]
+    lab = strategy_label(pr.get('PullInWeight'), pr['PullIn'])
+    inten, nc = pullin_intensity(pr.get('PullInWeight'))
+    eff = (min(float(pr['ServiceLevelPct']), float(pr['MaxPullInPct'])) * inten) if pr['PullIn'] == 'Y' and lab != 'Avoid' else 0
+
+    def delta(x, y, unit='', pct=False, good_up=True):
+        d = y - x
+        if abs(d) < (0.05 if pct else 0.5):
+            return '<span class="muted">same as saved</span>'
+        tone = 'ok' if (d > 0) == good_up else 'bad'
+        txt = f'{d:+.1f} pts' if pct else f'{"+" if d > 0 else "−"}{short(abs(d))}{unit}'
+        return f'<span style="color:var(--{tone})">{txt} vs saved</span>'
+    tones = {'Aggressive': 'bad', 'Moderate': 'warn', 'Conservative': 'ok', 'Neutral': 'info', 'Avoid': ''}
+    k = [
+        ('Strategy', lab, f'{eff:.0f}% of a shortfall may be built early{"; may use non-consignee testers" if nc and eff else ""}', tones.get(lab, '')),
+        ('Total gap', short(b['gap_total']) if b['gap_total'] > 0.5 else 'None', delta(a['gap_total'], b['gap_total'], good_up=False), 'bad' if b['gap_total'] > 0.5 else 'ok'),
+        ('Pull-in production', short(b['pull_total']) if b['pull_total'] > 0.5 else 'None', delta(a['pull_total'], b['pull_total']), 'info'),
+        ('Forecast achievement', f'{b["on_time"]:.1f}%', 'on time · ' + delta(a['on_time'], b['on_time'], pct=True), 'ok' if b['on_time'] > 99.5 else 'warn'),
+        ('Peak build-ahead stock', short(b['peak_ahead']) if b['peak_ahead'] > 0.5 else 'None', 'cash tied up · ' + delta(a['peak_ahead'], b['peak_ahead'], good_up=False), 'warn' if b['peak_ahead'] > 0.5 else ''),
+        ('Customers short (peak)', short(b['short_peak']) if b['short_peak'] > 0.5 else 'None', delta(a['short_peak'], b['short_peak'], good_up=False), 'bad' if b['short_peak'] > 0.5 else 'ok'),
+    ]
+    kh = '<div class="kpis">' + ''.join(f'<div class="kpi {t}"><div class="label">{escape(l)}</div><div class="value">{escape(v)}</div><div class="sub">{s}</div></div>'
+                                          for l, v, s, t in k) + '</div>'
+    months = p.months
+    c1 = charts.bars(months, [('Pull-in production', b['pull']), ('Gap (made late)', b['gap'])],
+                     lines=[('Build-ahead stock', b['ahead'])], stacked=False, title='Gap and pull-in')
+    cum = lambda xs: [sum(xs[:i + 1]) for i in range(len(xs))]
+    c2 = charts.lines(months, [('Cumulative demand', cum(b['dem']), False), ('Cumulative shipped', cum(b['ship']), False),
+                               ('Cumulative customer forecast', cum(b['fc']), True)], title='Cumulative')
+    return (kh + f'<div class="cols"><section class="panel"><h2>{escape(sku)}: gap vs pull-in production</h2>'
+            f'<p class="sub">Test units across all OSATs. Bars: built early, made late. Line: stock built ahead.</p>{c1}</section>'
+            f'<section class="panel"><h2>{escape(sku)}: cumulative demand vs shipments</h2><p class="sub">Shipped below demand = customers short.</p>{c2}</section></div>')
+
+
+# ------------------------------------------------------------------ dashboards
+def _idle(p, v, st, i):
+    a = p.alloc.get((v, st))
+    if not a:
+        return 0.0
+    x = a['summary'][i]
+    return max(0.0, x['total'] - x['used'])
+
+
+def m1_dashboard(R, args):
+    """Module 1 analytics dashboard: gaps, pull-in, cumulative achievement, vendor split, root cause, recovery plan."""
+    p = R['plan']
+    H, months = p.H, p.months
+    fs, fv, fstep = args.get('sku'), args.get('vendor'), args.get('step')
+    lines = [l for l in R['testing']['lines'] if (not fs or l['sku'] == fs) and (not fv or l['vendor'] == fv) and (not fstep or l['step'] == fstep)]
+    load = sum(l['ins_req'] for l in lines)
+    made = sum(l['prod'] for l in lines)
+    gap = sum(l['gap'] for l in lines)
+    pull = sum(l['pullin'] for l in lines)
+    nc_t = sum(l['tn'] for l in lines)
+    all_t = sum(l['tc'] + l['tn'] for l in lines) or 1
+    dem = [0.0] * H
+    ship = [0.0] * H
+    shortv = [0.0] * H
+    fc = [0.0] * H
+    for (sku, v), f in p.fg.items():
+        if (fs and sku != fs) or (fv and v != fv):
+            continue
+        for i in range(H):
+            dem[i] += f['demand'][i]
+            ship[i] += f['ship'][i]
+            shortv[i] += f['short'][i]
+    for sku in p.products:
+        if not fs or sku == fs:
+            share = sum(ch.share for ch in p.chains if ch.sku == sku and (not fv or ch.vendor == fv))
+            for i in range(H):
+                fc[i] += p.fc.get(sku, [0.0] * p.HX)[i] * share
+    tot_dem = sum(dem) or 1
+    ontime = sum(d - max(0.0, s - (shortv[i - 1] if i else 0)) for i, (d, s) in enumerate(zip(dem, shortv))) / tot_dem * 100
+    sections = [{'type': 'kpis', 'items': [
+        K('Test load', short(load), 'insertions incl. retest'),
+        K('Made', short(made), f'{made / load * 100:.1f}% of load' if load else ''),
+        K('Gap (made late)', short(gap) if gap > 0.5 else 'None', 'after pull-in', 'bad' if gap > 0.5 else 'ok'),
+        K('Pull-in production', short(pull) if pull > 0.5 else 'None', f'{pull / (pull + gap) * 100:.0f}% of the crunch covered early' if pull + gap > 0.5 else '', 'info'),
+        K('Forecast achievement', f'{ontime:.1f}%', 'demand shipped on time', 'ok' if ontime > 99.5 else 'warn'),
+        K('Non-consignee share', f'{nc_t / all_t * 100:.0f}%', 'of tester-months used', 'warn' if nc_t / all_t > .1 else ''),
+    ]}]
+    by_v = defaultdict(float)
+    for l in lines:
+        by_v[f'OSAT-{l["vendor"]}'] += l['prod']
+    by_s = defaultdict(float)
+    for l in lines:
+        by_s[l['sku']] += l['prod']
+    sections.append(cols2(chart('Production by OSAT', charts.donut(sorted(by_v.items()), 'Production by OSAT')),
+                          chart('Production by product', charts.donut(sorted(by_s.items(), key=lambda kv: -kv[1]), 'Production by product'))))
+    g_m = [sum(l['gap'] for l in lines if l['month'] == m) for m in months]
+    p_m = [sum(l['pullin'] for l in lines if l['month'] == m) for m in months]
+    c_m = [sum(l['covered'] for l in lines if l['month'] == m) for m in months]
+    sections.append(chart('Gap and pull-in by month', charts.bars(months, [('Pull-in production (made early)', p_m), ('Gap (made late)', g_m)],
+                                                                 lines=[('Shortfall covered by pull-in', c_m)], stacked=False, title='Gap and pull-in'),
+                          'Pull-in bars sit in the months the testers build ahead; the line shows the later months that stock covers.'))
+    cum = lambda xs: [sum(xs[:i + 1]) for i in range(len(xs))]
+    sections.append(chart('Cumulative forecast, demand and production', charts.lines(
+        months, [('Cumulative customer forecast', cum(fc), True), ('Cumulative demand', cum(dem), False), ('Cumulative shipped', cum(ship), False)],
+        title='Cumulative'), 'Shipped below demand means customers are short; above forecast means booked orders exceed the forecast.'))
+    vend = sorted({l['vendor'] for l in lines})
+    sections.append(chart('Tester-months used by OSAT', charts.bars(months, [(f'OSAT-{v}', [sum(l['tc'] + l['tn'] for l in lines if l['vendor'] == v and l['month'] == m) for m in months]) for v in vend],
+                                                                    lines=[('Tester-months available', [sum(x['total'] for (vv, st), a in p.alloc.items() if vv in vend and st != 'Sort' and (not fstep or st == fstep) for x in a['summary'][i:i + 1]) for i in range(H)])],
+                                                                    title='Testers used')))
+    # root cause and recovery plan
+    res_gap = defaultdict(float)
+    sku_gap = defaultdict(float)
+    for l in lines:
+        res_gap[(l['vendor'], l['step'])] += l['gap']
+        sku_gap[l['sku']] += l['gap']
+    insights = []
+    if gap <= 0.5:
+        insights.append('<b>No test shortfall.</b> Every final-test step can make its load in the month it is needed' +
+                        (f', with {short(pull)} units built ahead by pull-in.' if pull > 0.5 else '.'))
+    else:
+        top = sorted(res_gap.items(), key=lambda kv: -kv[1])
+        (tv, ts), tg = top[0]
+        gm = [x['month'] for x in p.alloc[(tv, ts)]['summary'][:H] if x['gap'] > 0.5]
+        pk = max(p.alloc[(tv, ts)]['summary'][:H], key=lambda x: x['load_util'])
+        insights.append(f'<b>{tg / gap * 100:.0f}% of the shortfall is at OSAT-{tv} {ts}</b>, in {", ".join(mlabel(m) for m in gm[:4])}{"…" if len(gm) > 4 else ""}; '
+                        f'load peaks at {pk["load_util"]:.0f}% in {mlabel(pk["month"])} ({pk["needed"]:.1f} testers needed, {pk["total"]} available).')
+        drv = sorted(sku_gap.items(), key=lambda kv: -kv[1])
+        insights.append('<b>Products short:</b> ' + ', '.join(f'{s} {short(g)}' for s, g in drv if g > 0.5) +
+                        '. Lower-priority products lose testers first (priority on Products / Pull-in Setup).')
+        ramp = []
+        for s in p.products:
+            d = p.dem.get(s, [0] * H)
+            if d[0] > 0 and max(d[:H]) > 1.2 * d[0]:
+                ramp.append(f'{s} +{(max(d[:H]) / d[0] - 1) * 100:.0f}%')
+        if ramp:
+            insights.append('<b>Demand driver:</b> ramp from the first month to the peak: ' + ', '.join(ramp) + '.')
+        insights.append(f'<b>Pull-in</b> covered {pull / (pull + gap) * 100:.0f}% of the crunch early; the rest is made late (catch-up). '
+                        'Raise the pull-in weight or cap on Pull-in Setup, or add capacity on Tester & Capacity Overrides.')
+        if not p.allow_nc:
+            insights.append('<b>Non-consignee testers are switched off</b> in Plan settings; allowing them adds OSAT capacity at a higher rate.')
+    sections.append(html('<section class="panel"><h2>Gap analysis &amp; insights</h2><ul class="insights">' + ''.join(f'<li>{x}</li>' for x in insights) + '</ul></section>'))
+    plan_rows = []
+    for i, m in enumerate(months):
+        gm_ = [l for l in lines if l['month'] == m and l['gap'] > 0.5]
+        g = sum(l['gap'] for l in gm_)
+        pu = sum(l['pullin'] for l in lines if l['month'] == m)
+        if g <= 0.5 and pu <= 0.5:
+            continue
+        if g > 0.5:
+            worst = max(gm_, key=lambda l: l['gap'])
+            v, st, sku = worst['vendor'], worst['step'], worst['sku']
+            alt = []
+            for ch in p.chains:
+                if ch.sku == sku and ch.vendor != v and st in ch.ops:
+                    idle = _idle(p, ch.vendor, st, i)
+                    if idle > 0.2:
+                        u = p.upm(ch.vendor, sku, st, i)[0]
+                        alt.append((idle * u, ch.vendor, idle))
+            alt.sort(reverse=True)
+            if alt and alt[0][0] >= 0.3 * worst['gap']:
+                act = f'Move {short(min(worst["gap"], alt[0][0]))} {sku} units to OSAT-{alt[0][1]} {st} ({alt[0][2]:.1f} testers idle there)'
+            else:
+                need_t = worst['gap'] / worst['upm'] if worst['upm'] else 0
+                act = f'Add {max(1, round(need_t + 0.49))} tester(s) at OSAT-{v} {st} from {mlabel(m)} (enter it on Overrides), or allow non-consignee time'
+            driver = f'OSAT-{v} {st} · {sku}'
+        else:
+            act, driver = 'Spare tester time builds ahead for a later crunch', 'Pull-in month'
+        plan_rows.append({'month': m, 'gap': g, 'pull': pu, 'net': pu - g, 'driver': driver, 'action': act, 'tone': 'bad' if g > 0.5 else 'info',
+                          'kind': 'GAP' if g > 0.5 else 'PULL-IN'})
+    sections.append(table('Monthly gap breakdown & recovery plan', [
+        col('kind', '', 'badge', tone='tone'), col('month', 'Month', 'month'), col('gap', 'Gap', 'int'), col('pull', 'Pull-in', 'int'),
+        col('net', 'Net (pull-in − gap)', 'int'), col('driver', 'Primary driver'), col('action', 'Recommended action')],
+        plan_rows, search=False, empty='No gap and no pull-in in any month.'))
+    opt = []
+    for sku in sorted(p.products):
+        chs = [ch for ch in p.chains if ch.sku == sku]
+        if len(chs) < 2 or (fs and sku != fs):
+            continue
+        g_by = {ch.vendor: sum(ch.levels['Test1']['alloc']['gap'][:H]) for ch in chs if 'Test1' in ch.ops}
+        if sum(g_by.values()) <= 0.5:
+            continue
+        gap_months = [i for i in range(H) if sum(ch.levels['Test1']['alloc']['gap'][i] for ch in chs if 'Test1' in ch.ops) > 0.5]
+        idle_units = {ch.vendor: (0.0 if g_by.get(ch.vendor, 0) > 0.5 else
+                                  sum(_idle(p, ch.vendor, 'Test1', i) * p.upm(ch.vendor, sku, 'Test1', i)[0] for i in gap_months)) for ch in chs}
+        tot_load = sum(sum(ch.levels['Test1']['alloc']['load'][:H]) for ch in chs) or 1
+        for ch in chs:
+            v = ch.vendor
+            ld = sum(ch.levels['Test1']['alloc']['load'][:H])
+            move = -g_by.get(v, 0) + (sum(g_by.values()) * idle_units[v] / (sum(idle_units[x] for x in idle_units if g_by.get(x, 0) <= 0.5) or 1)
+                                       if g_by.get(v, 0) <= 0.5 else 0)
+            new_share = max(0.0, (ld + move) / tot_load * 100)
+            opt.append({'sku': sku, 'vendor': f'OSAT-{v}', 'now': ch.share * 100, 'gap': g_by.get(v, 0), 'idle': idle_units[v],
+                        'suggest': new_share, 'delta': new_share - ch.share * 100})
+    sections.append(table('Vendor split optimisation (Test 1)', [
+        col('sku', 'Product'), col('vendor', 'OSAT'), col('now', 'Share now %', 'num1'), col('gap', 'Gap there', 'int'),
+        col('idle', 'Idle there in the short months (units)', 'int'), col('suggest', 'Suggested share %', 'num1'), col('delta', 'Change (pts)', 'num1')],
+        opt, search=False, note='Moves the shortfall to OSATs with idle tester capacity for that product. Change shares in OSAT vendors (all products) to apply it.',
+        empty='No product has a gap that another qualified OSAT could absorb.'))
+    return page('m1-dashboard', sections, filters=filter_spec(R) + [('step', 'Step', ['Test1', 'Test2'])])
+
+
+def flow_dashboard(R, args):
+    p = R['plan']
+    H, months = p.H, p.months
+    rows = apply_filters(R['flow']['rows'], args)
+    proc = args.get('process')
+    unit_ops = ['Assembly', 'Test1', 'Test2', 'Pack']
+    out_tot = sum(r['pack_out'] for r in rows)
+    act_proc = [op for op in FLOW_ORDER if any((r[op] or 0) > 0.5 for r in rows)]
+    sections = [{'type': 'kpis', 'items': [
+        K('Total output', short(out_tot), 'units out of Pack'),
+        K('Shipped', short(sum(r['ship'] for r in rows)), f'of {short(sum(r["demand"] for r in rows))} demand'),
+        K('Active processes', str(len(act_proc)), ', '.join(act_proc)),
+        K('Products', str(len({r['sku'] for r in rows}))),
+        K('Active OSATs', str(len({r['vendor'] for r in rows}))),
+        K('Fab wafer starts', short(sum(R['flow']['totals']['fab_starts'])), 'wafers, all products'),
+    ]}]
+    by_v = defaultdict(float)
+    by_s = defaultdict(float)
+    for r in rows:
+        by_v[f'OSAT-{r["vendor"]}'] += r['pack_out']
+        by_s[r['sku']] += r['pack_out']
+    sections.append(cols2(chart('Output share by OSAT', charts.donut(sorted(by_v.items()), 'Output by OSAT')),
+                          chart('Output by product', charts.donut(sorted(by_s.items(), key=lambda kv: -kv[1]), 'Output by product'))))
+    ops = [proc] if proc in unit_ops else unit_ops
+    sections.append(chart('Starts by process and month (units)', charts.bars(
+        months, [(op, [sum((r[op] or 0) for r in rows if r['month'] == m) for m in months]) for op in ops], stacked=False,
+        lines=[('Demand', [sum(r['demand'] for r in rows if r['month'] == m) for m in months])], title='Starts by process')))
+    wops = [proc] if proc in ('Sort', 'Bump') else ['Sort', 'Bump']
+    sections.append(chart('Wafer starts at the OSATs (wafers)', charts.bars(
+        months, [(op, [sum((r[op] or 0) for r in rows if r['month'] == m) for m in months]) for op in wops], stacked=False,
+        lines=[('Fab wafer starts', R['flow']['totals']['fab_starts'])], title='Wafers')))
+    ptot = [{'process': op, 'qty': sum((r[op] or 0) for r in rows), 'unit': 'wafers' if op in ('Sort', 'Bump') else 'units'} for op in FLOW_ORDER]
+    stot = []
+    for sku in sorted({r['sku'] for r in rows}):
+        rs = [r for r in rows if r['sku'] == sku]
+        d = sum(r['demand'] for r in rs)
+        stot.append({'sku': sku, 'demand': d, 'out': sum(r['pack_out'] for r in rs), 'ship': sum(r['ship'] for r in rs),
+                     'short': max([sum(r['short'] for r in rs if r['month'] == m) for m in months] + [0]),
+                     'fill': sum(r['ship'] for r in rs) / d * 100 if d else 100})
+    sections.append(cols2(table('Totals by process', [col('process', 'Process'), col('qty', 'Starts', 'int'), col('unit', 'Unit')], ptot, search=False),
+                          table('Totals by product', [col('sku', 'Product'), col('demand', 'Demand', 'int'), col('out', 'Pack output', 'int'),
+                                                      col('ship', 'Shipped', 'int'), col('short', 'Peak short', 'int'), col('fill', 'Fill %', 'num1')], stot, search=False)))
+    return page('flow-dashboard', sections, filters=filter_spec(R) + [('process', 'Process', FLOW_ORDER)])

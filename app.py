@@ -142,7 +142,7 @@ def edited_tables(ws):
 @app.context_processor
 def _globals():
     return {'feedback_url': FEEDBACK_URL, 'tester': session.get('tester'), 'access_on': bool(_testers()),
-            'chat_ai': assistant.ai_enabled(), 'nav_groups': modules.nav_groups(), 'icons': modules.ICONS,
+            'chat_ai': assistant.ai_enabled(), 'nav_groups': modules.nav_groups(), 'icons': modules.ICONS, 'nav_sub': modules.SUB,
             'tables_meta': W.TABLES, 'mlabel': views.mlabel, 'nav_label': modules.label}
 
 
@@ -216,6 +216,7 @@ BUILDERS = {
     'frontend': views.frontend, 'flow': views.flow, 'testers': views.testers, 'hardware': views.hardware,
     'ate': views.ate, 'npi': views.npi, 'fab-po': views.fab_po, 'osat-po': views.osat_po, 'substrate': views.substrate,
     'cross-flow': views.cross_flow, 'b2b': views.b2b, 'pva': views.pva, 'cost': views.cost, 'pnl': views.pnl,
+    'm1-dashboard': views.m1_dashboard, 'flow-dashboard': views.flow_dashboard,
 }
 
 
@@ -540,7 +541,8 @@ def pullin_save():
         s = r['SKU']
         if f'pull_{s}' in request.form or f'sl_{s}' in request.form:
             r['PullIn'] = 'Y' if request.form.get(f'pull_{s}') == 'Y' else 'N'
-            for fld, key in (('ServiceLevelPct', 'sl'), ('MaxPullInPct', 'max'), ('Priority', 'prio'), ('SafetyStockWeeks', 'ss')):
+            for fld, key in (('ServiceLevelPct', 'sl'), ('MaxPullInPct', 'max'), ('Priority', 'prio'), ('SafetyStockWeeks', 'ss'),
+                             ('PullInWeight', 'w')):
                 v = request.form.get(f'{key}_{s}')
                 if v not in (None, ''):
                     r[fld] = v
@@ -560,6 +562,57 @@ def pullin_save():
     _mark_edited(ws, 'products')
     W.save(wsid, ws)
     return redirect(url_for('module_page', key='pullin', msg='Pull-in settings saved; the plan has been recalculated.'))
+
+
+def _pullin_variant(ws, f):
+    """Copy of the workspace with one product's pull-in settings (and the non-consignee switch) changed."""
+    import copy
+    sku = f.get('sku')
+    new = {'tables': dict(ws['tables'])}
+    prods = copy.deepcopy(ws['tables']['products'])
+    hit = False
+    for r in prods:
+        if r['SKU'] == sku:
+            hit = True
+            for fld, key in (('PullInWeight', 'weight'), ('ServiceLevelPct', 'sl'), ('MaxPullInPct', 'max'),
+                             ('PullIn', 'pull'), ('BuildStrategy', 'build')):
+                if f.get(key) not in (None, ''):
+                    r[fld] = f.get(key)
+    clean, errors = W.validate_rows('products', prods)
+    if not hit or errors:
+        return None, (errors[0][2] if errors else 'Unknown product')
+    new['tables']['products'] = clean
+    if f.get('nc') in ('Y', 'N'):
+        st = [dict(r, Value=(f['nc'] if r['Setting'] == 'Allow non-consignee testers' else r['Value'])) for r in ws['tables']['settings']]
+        new['tables']['settings'], _ = W.validate_rows('settings', st)
+    return new, None
+
+
+@app.post('/api/pullin/preview')
+def pullin_preview():
+    wsid, ws = ws_get()
+    f = request.get_json(silent=True) or {}
+    variant, err = _pullin_variant(ws, f)
+    if err:
+        return jsonify({'error': err}), 400
+    R = results(wsid, ws)
+    Rn = cockpit.compute(variant)
+    return jsonify({'html': views.pullin_preview_html(R, Rn, f.get('sku'))})
+
+
+@app.post('/pullin/save-one')
+def pullin_save_one():
+    wsid, ws = ws_get()
+    variant, err = _pullin_variant(ws, request.form)
+    if err:
+        return redirect(url_for('module_page', key='pullin', err=err))
+    ws['tables']['products'] = variant['tables']['products']
+    ws['tables']['settings'] = variant['tables']['settings']
+    _mark_edited(ws, 'products')
+    _mark_edited(ws, 'settings')
+    W.save(wsid, ws)
+    sku = request.form.get('sku')
+    return redirect(url_for('module_page', key='pullin', sku_sel=sku, msg=f'Pull-in strategy for {sku} saved; every module has been re-planned.'))
 
 
 @app.post('/sku-setup/create')

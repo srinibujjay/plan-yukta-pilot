@@ -26,7 +26,7 @@
   <p class="sub">Bars: testers available with your overrides. Black line: testers the plan needs. Blue line: testers you would have without overrides.</p>
   {{ page.chart|safe }}
 </section>
-{{ grid(page.timeline) }}
+{% if page.timeline %}{{ grid(page.timeline) }}{% endif %}
 
 {% macro opts(items, sel=None, kind=None) %}{% for o in items %}<option value="{{ o }}" {{ 'selected' if o == sel }}>{{ mlabel(o) if kind == 'month' else ('OSAT-' ~ o if kind == 'vendor' else o) }}</option>{% endfor %}{% endmacro %}
 {% macro del_btn(table, i, r) %}<form method="post" action="/overrides/delete" onsubmit="return confirm('Delete this override?')"><input type="hidden" name="table" value="{{ table }}"><input type="hidden" name="i" value="{{ i }}"><input type="hidden" name="sig" value="{{ r|tojson|forceescape }}"><button class="xbtn" type="submit" title="Delete this override" aria-label="Delete">✕</button></form>{% endmacro %}

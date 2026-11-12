@@ -33,7 +33,7 @@
         <button class="nav-head" type="button" aria-expanded="true"><span>{{ g }}</span><span class="chev">▼</span></button>
         <div class="nav-items">
           {% for k, _, label, ic in items %}
-          <a class="nav-item {{ 'on' if key == k }}" href="{{ href(k) }}">{{ ico(ic) }}<span>{{ label }}</span>
+          <a class="nav-item {{ 'on' if key == k }}{{ ' sub' if k in nav_sub }}" href="{{ href(k) }}">{{ ico(ic) }}<span>{{ label }}</span>
             {% if k == 'checks' and badges and badges.checks %}<span class="badge warn">{{ badges.checks }}</span>{% endif %}</a>
           {% endfor %}
         </div>
