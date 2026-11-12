@@ -22,19 +22,23 @@ The demo data is synthetic: products (ORION, VEGA, LYRA, ATLAS, NOVA), vendors (
 | | Tester Capacity | Load and utilisation by OSAT, step and month; throughput per product |
 | | Hardware Readiness | Sockets, load boards, probe cards against the consignee fleet |
 | | ATE Economics | Buy or rent: payback, NPV and ROI for 1–4 new testers, capacity slack |
-| | NPI Management | Engineering lot timeline, qualification Gantt, risk against first demand |
+| | NPI Management | Engineering lot timeline, qualification Gantt with milestone status and actual dates, risk against first demand |
 | Procurement & B2B | FAB PO Schedule | Wafer POs with cutoff and reservation dates, expedite list, XML |
 | | OSAT PO Schedule | Monthly work orders and cost per OSAT, XML |
 | | Substrate & Lead Frame | FIFO with expiry against the assembly plan |
 | | Cross Flow | Inter-OSAT moves, cost and rule checks (overlay) |
 | | Monthly B2B Package | Time-fenced supplier forecasts, REQUEST / COMMIT / GAP workbook |
+| Vendors, customers & quality | Vendor QBR & Issues | OSAT ranking on quality, delivery, cost, capacity, responsiveness; QBR agenda and Excel pack; 8D issues log |
+| | Customer Rating | How reliably each customer takes agreed orders; commit policy; risk-adjusted open orders |
+| | Post-Silicon Analysis | Lot yield control chart, failure signatures, tester outliers, fail-bin Pareto, bin split; push results by API; feed yields into the plan |
 | Analytics & monitoring | Plan vs Actual | Attainment, OEE, reliability score, recovery actions |
+| | Inventory Health | WIP and FG at standard cost, days of supply, excess, date-code aging and obsolete risk |
 | | Snapshot Comparison | Save the plan, change data, see what moved |
 | | Cost Planning | Spend by supplier and process; standard cost roll-up through yields |
 | | Profit & Loss | Revenue, COGS and margin by product and customer; lost revenue |
 | | OSAT WIP Snapshot | Vendor codes mapped to SKUs and steps; holds you can release |
 | | Lot-level WIP Audit | Upload raw fab and OSAT reports to de-duplicate rows and measure lead times |
-| Data & setup | Data Tables | 28 editable tables, CSV/Excel upload and download per table |
+| Data & setup | Data Tables | 33 editable tables, CSV/Excel upload and download per table |
 | | SKU Setup Wizard | Clone a product into every table in one step |
 | | Data Checks | Problems that change or stop the plan |
 | | Import / Export | Whole workspace as one Excel workbook, up and down |
@@ -49,6 +53,7 @@ Every formula is in [CALCULATIONS.md](CALCULATIONS.md), also shown in the app un
 | `plan_yukta/workspace.py` | Table catalogue, validation, per-visitor workspace storage, Excel import/export |
 | `plan_yukta/demo_data.py` | The synthetic demo dataset |
 | `plan_yukta/cockpit.py` | Planning engine: backward pass, tester allocation, fab, FG, and every module's results |
+| `plan_yukta/insights.py` | Vendor QBR scorecard, customer rating, post-silicon analysis, inventory health |
 | `plan_yukta/views.py` | Page builders (KPIs, charts, month grids, tables) |
 | `plan_yukta/charts.py` | Server-rendered SVG charts |
 | `plan_yukta/modules.py` | Sidebar, module descriptions, demo tour |
@@ -56,6 +61,10 @@ Every formula is in [CALCULATIONS.md](CALCULATIONS.md), also shown in the app un
 | `plan_yukta/assistant.py` | "Ask Plan Yukta" chat (help search, or Claude if `ANTHROPIC_API_KEY` is set) |
 | `plan_yukta/engine.py`, `osat_transfer_dedup.py`, `audit_view.py` | Lot-level WIP audit |
 | `templates/`, `static/` | Pages, styles (dark and light), scripts, audit template and sample |
+
+## Test-data API
+
+`POST /api/v1/test-results` takes `{"results": [...], "bins": [...]}` (column names as in the Test results and Test bin counts tables) with `Authorization: Bearer <token>`. The token is shown on Post-Silicon Analysis and belongs to that browser's workspace. It is a generic JSON endpoint for an export job from a yield-analytics tool, an OSAT feed or a script; it is not a connector to any specific product.
 
 ## Run locally
 

@@ -35,6 +35,10 @@ ICONS = {
     'help': 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM9.5 9a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6V14M12 17v.5',
     'tour': 'M5 3v18M5 4h11l-2 4 2 4H5',
     'dash': 'M4 4h7v7H4zM13 4h7v4h-7zM13 10h7v10h-7zM4 13h7v7H4z',
+    'qbr': 'M12 3l2.6 5.6 6 .7-4.5 4 1.2 6L12 16.4 6.7 19.3l1.2-6-4.5-4 6-.7z',
+    'customer': 'M8 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7zM2 20c0-3.3 2.7-6 6-6s6 2.7 6 6M16 4.5a3.5 3.5 0 0 1 0 6.5M18 14c2.4.8 4 3 4 6',
+    'chip': 'M8 8h8v8H8zM5 5h14v14H5zM9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3',
+    'inventory': 'M3 21V8l9-5 9 5v13M7 21v-8h10v8M7 17h10',
     'override': 'M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0M14 4v4M8 10v4M16 16v4',
 }
 
@@ -60,7 +64,11 @@ NAV = [
     ('substrate', 'Procurement & B2B', 'Substrate & Lead Frame', 'layers'),
     ('cross-flow', 'Procurement & B2B', 'Cross Flow', 'cross'),
     ('b2b', 'Procurement & B2B', 'Monthly B2B Package', 'calendar'),
+    ('vendor-qbr', 'Vendors, customers & quality', 'Vendor QBR & Issues', 'qbr'),
+    ('customers', 'Vendors, customers & quality', 'Customer Rating', 'customer'),
+    ('postsilicon', 'Vendors, customers & quality', 'Post-Silicon Analysis', 'chip'),
     ('pva', 'Analytics & monitoring', 'Plan vs Actual', 'pva'),
+    ('inventory', 'Analytics & monitoring', 'Inventory Health', 'inventory'),
     ('snapshots', 'Analytics & monitoring', 'Snapshot Comparison', 'camera'),
     ('cost', 'Analytics & monitoring', 'Cost Planning', 'cost'),
     ('pnl', 'Analytics & monitoring', 'Profit & Loss', 'pnl'),
@@ -76,7 +84,7 @@ NAV = [
 
 SUB = {'m1-dashboard', 'pullin', 'flow-dashboard'}   # shown indented under the module above them
 
-GROUP_ORDER = ['Planning modules', 'Capacity & engineering', 'Procurement & B2B', 'Analytics & monitoring', 'Data & setup', 'Help']
+GROUP_ORDER = ['Planning modules', 'Capacity & engineering', 'Procurement & B2B', 'Vendors, customers & quality', 'Analytics & monitoring', 'Data & setup', 'Help']
 
 INFO = {
     'home': dict(
@@ -221,7 +229,8 @@ INFO = {
         what='For each NPI product Plan Yukta lays out the engineering wafers through the fab and every OSAT step (cycle times from Process flow), then the qualification milestones one after another, each with its readout. If qualification finishes after the first month with customer demand, the product is flagged: production must start at risk or the demand must move.',
         how=['Samples ready = NPI start + fab cycle time + transit + Σ OSAT cycle times.',
              'Qualification end = samples ready + Σ (cycle days + readout days) over the milestones.',
-             'Risk = qualification end later than the first day of the first month with demand.'],
+             'Risk = qualification end later than the first day of the first month with demand, or any milestone Failed.',
+             'Status and ActualEnd per milestone: an actual readout date replaces the plan and every later milestone re-plans from it.'],
         tables=['npi_milestones', 'products', 'process_flow', 'forecast'],
         tryit=['In Customer forecast, delete the NOVA rows before 2027-08 (demand starts in August) and the risk clears.',
                'Or shorten the long tests (HTOL 1000 h, HTSL 500 h) in NPI qualification plan and watch the end date move.']),
@@ -265,6 +274,55 @@ INFO = {
              'XML exports are simplified, RosettaNet-style messages (forecast and purchase order) for illustration, not certified PIP schemas.'],
         tables=['settings'],
         tryit=['Download the package, fill a few COMMIT cells lower than REQUEST, and see the GAP row go red.']),
+    'vendor-qbr': dict(
+        title='Vendor QBR & Issues',
+        summary='Rank your OSATs on quality, delivery, cost, capacity and responsiveness, run the quarterly business review, and track every supplier issue to closure.',
+        what='The scorecard is worked out from data already in the workspace: test yields against plan, delivered against the frozen plan, quotes against each other, the forward tester plan and the issues log. Pick a review period, read the agenda the scorecard writes for each vendor, and download a QBR pack to send before the meeting.',
+        how=['Quality = average of (test yield ÷ planned yield, capped at 100%) and reported quality % from Vendor actuals.',
+             'Delivery = Σ min(actual, plan) ÷ Σ plan over the period, from Vendor actuals and the frozen plan.',
+             'Cost = price index: for each step and product two or more OSATs quote, lowest price ÷ this OSAT\'s price × 100, averaged.',
+             'Capacity = share of the planned test load in the horizon made in its own month or pulled in ahead (not late).',
+             'Category score = 100 at or above target, minus 5 points per % below. Responsiveness = 100 if the average days to close is at or under target, minus 3 points per day over, minus 10 per overdue issue and 15 per open critical issue.',
+             'Total = weighted average of the category scores (QBR scorecard weights). Grade A ≥ 90, B ≥ 80, C ≥ 70, D below.'],
+        tables=['vendor_issues', 'qbr_weights', 'actuals', 'plan_snapshot', 'test_results', 'osat_costs', 'tester_capacity'],
+        tryit=['Close the open OSAT-C issues from the log and watch its Responsiveness score and rank change.',
+               'Set Cost weight to 40% in QBR scorecard weights to rank the vendors for a cost-down review.',
+               'Download the QBR pack for OSAT-A.']),
+    'customers': dict(
+        title='Customer Rating',
+        summary='How reliably each customer takes the orders they agreed: accepted, pulled in, pushed out, reduced or cancelled, and what that means for open orders.',
+        what='Fabless companies commit wafers months before a customer takes delivery. The rating measures how often each customer honoured agreed orders, turns that into a commit policy, and haircuts the open order book by each customer\'s history.',
+        how=['Pushed out %, Cancelled % and Reduced % are shares of agreed quantity (reduced = agreed − actual on reduced orders).',
+             'Score = 100 − (pushed out % × 0.6 + cancelled % × 1.0 + reduced % × 0.8). Excellent ≥ 95, Good ≥ 85, Fair ≥ 70, Risk below.',
+             'Open orders at risk = open order units × (pushed out % + cancelled % + reduced %) ÷ 100.'],
+        tables=['order_history', 'orders', 'pricing'],
+        tryit=['Change two Customer Alpha orders to Pushed out in Agreed-order history and see its rating drop.',
+               'Compare Customer Gamma\'s at-risk revenue with the P&L page.']),
+    'postsilicon': dict(
+        title='Post-Silicon Analysis',
+        summary='Lot and wafer test results: yield trend with control limits, OSAT and tester comparison, fail-bin Pareto, bin split, and alerts you can turn into plan changes.',
+        what='Load lot results by file or push them from your test-data or yield-analytics tool through the API at the bottom of the page. Plan Yukta flags lots below the lower control limit, reads their failure signature from the bins, spots testers that run below their peers, and detects a sustained yield shift. One click puts the actual yield or bin split into the plan.',
+        how=['Lot yield = passed ÷ tested over all wafers of the lot at the step.',
+             'Centre line = median lot yield; σ = 1.4826 × median absolute deviation (a robust sigma); limits = centre ± SPC sigma × σ (Plan settings).',
+             'Failure signature: the fail bin whose share of a lot\'s fails is furthest above its normal share. 15 points or more = a single failure mode.',
+             'Tester outlier: yield 1.5 points or more below the other testers at the same OSAT over 3+ lots, leaving out lots with their own failure signature.',
+             'Sustained shift: the last 5 lots at an OSAT average more than 2 points below the plan yield.',
+             'Use in plan: adds a Yield override for the product, OSAT and step from the plan start month at the last-5-lot mean.'],
+        tables=['test_results', 'test_bins', 'process_flow', 'bin_splits', 'yield_overrides'],
+        tryit=['Open LYRA: OSAT-C has run at about 84% since October, but the plan only switches to 84% from December. Press "Use … in the plan" to plan November at the actual yield too.',
+               'Look at ORION in August: three OSAT-A lots below the limit with continuity (HB5) failures, and tester T7-B05 running low at OSAT-B.']),
+    'inventory': dict(
+        title='Inventory Health',
+        summary='WIP and finished goods valued at standard cost, days of supply, excess above your threshold and stock aging toward obsolescence.',
+        what='Every lot in the OSAT WIP snapshot is converted to the finished units it should still yield and valued at the standard cost of the steps it has been through. Stock is compared with the plan demand to find excess, and date codes show what is ageing toward obsolescence.',
+        how=['FG-equivalent = quantity × yields of the steps still to come (wafers × gross die × all yields).',
+             'Value = FG-equivalent × standard cost of the steps completed (Cost Planning standard cost roll-up).',
+             'Days of supply: walk the plan demand month by month until the stock is used up.',
+             'Excess = stock above the demand of the next "Excess threshold weeks" (Plan settings) plus the product\'s total cycle time, valued at finished-goods cost first.',
+             'Aging from the YYWW date code; older than "Obsolete age months" = obsolete risk.'],
+        tables=['osat_wip', 'products', 'osat_costs', 'tester_capacity', 'settings'],
+        tryit=['ATLAS is end of life with stock from early 2025: see the excess and obsolete-risk value.',
+               'Set Excess threshold weeks to 4 in Plan settings and see which products move into excess.']),
     'pva': dict(
         title='Plan vs Actual',
         summary='What each OSAT delivered against the frozen plan, OEE, disruptions, a reliability score and recovery actions.',
@@ -355,5 +413,8 @@ TOUR = [
     ('fab-po', 'Place the wafer orders', 'Each wafer start is a PO line with its cutoff dates. Lines past cutoff are the frozen zone; the expedite table lists wafers needed sooner than the fab can make them.'),
     ('b2b', 'Send the monthly package', 'Download the B2B workbook: fab and OSAT forecasts with Frozen, Slushy and Liquid months and a COMMIT row for each supplier to fill in.'),
     ('npi', 'Check the new product', 'NOVA\'s qualification ends in July but customers want it from April. Push NOVA\'s forecast out to August, or shorten the longest tests, and the risk clears.'),
+    ('postsilicon', 'Turn test data into the plan', 'LYRA at OSAT-C has run at about 84% final-test yield since October against a planned 88%, and the plan only switches to 84% in December. Press "Use … in the plan" to plan November at the actual yield as well. On ORION, see the August continuity excursion at OSAT-A and the low-yield tester at OSAT-B.'),
+    ('vendor-qbr', 'Run the vendor QBR', 'The scorecard ranks the three OSATs from data already in the workspace. Close OSAT-C\'s overdue issues and watch its responsiveness score and rank move, then download its QBR pack.'),
+    ('customers', 'Rate your customers', 'Customer Gamma cancelled and reduced agreed orders, so it is rated Risk: build to firm PO only. Customer Alpha took every order as agreed.'),
     ('io', 'Use your own data', 'Download the workspace as Excel, replace the demo rows with your own (anonymised if needed), and upload it. Every module then runs on your data.'),
 ]

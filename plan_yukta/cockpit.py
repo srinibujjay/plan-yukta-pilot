@@ -1489,16 +1489,35 @@ def npi_view(p: Plan):
             t = steps[-1]['end']
         samples = t
         qual = []
+        failed = []
         for r in sorted(ms.get(sku, []), key=lambda r: r['Order']):
+            status = r.get('Status') or 'Planned'
+            actual = to_date(r.get('ActualEnd'))
             e = t + timedelta(days=int(r['CycleDays']))
             ro = e + timedelta(days=int(r['ReadoutDays']))
-            qual.append({'name': r['Milestone'], 'start': t, 'end': e, 'readout': ro, 'kind': 'qual'})
+            if actual:                       # the real readout date re-plans every later milestone
+                ro = actual
+                e = min(e, actual)
+            elif status == 'Running' and ro < p.as_of:
+                ro = p.as_of                 # still running past its planned readout: earliest finish is today
+            slip = (actual - (t + timedelta(days=int(r['CycleDays']) + int(r['ReadoutDays'])))).days if actual else 0
+            qual.append({'name': r['Milestone'], 'start': t, 'end': e, 'readout': ro, 'kind': 'qual',
+                         'status': status, 'actual': actual, 'slip': slip})
+            if status == 'Failed':
+                failed.append(r['Milestone'])
+            elif status != 'Passed' and not actual and ro < p.as_of:
+                p.issues.append(('warning', 'npi_milestones', f'{sku} "{r["Milestone"]}" should have read out by {ro:%d %b %Y}: '
+                                                              f'set its Status and ActualEnd.'))
             t = ro
         qual_done = t
         first_dem = next((p.months[i] for i in range(p.H) if p.dem.get(sku, [0] * p.H)[i] > 0), None)
         need_date = month_day(first_dem, 1) if first_dem else None
-        risk = bool(need_date and qual_done > need_date)
-        if risk:
+        risk = bool(need_date and qual_done > need_date) or bool(failed)
+        if failed:
+            p.alerts.append({'severity': 'high', 'module': 'NPI', 'sku': sku, 'month': first_dem,
+                             'text': f'{sku} failed {", ".join(failed)}: qualification is not complete until a fix is re-tested. '
+                                     f'Add the re-test as a new milestone and review the first-shipment date.'})
+        if need_date and qual_done > need_date:
             p.alerts.append({'severity': 'high', 'module': 'NPI', 'sku': sku, 'month': first_dem,
                              'text': f'{sku} qualification finishes {qual_done:%d %b %Y}, after the first customer demand '
                                      f'({need_date:%b %Y}). Production would have to start at risk, or demand moves out.'})
@@ -1506,7 +1525,9 @@ def npi_view(p: Plan):
         ch = next((c for c in p.chains if c.sku == sku), None)
         if ch:
             lead_m = ch.off['_fabstart']
+        done = sum(1 for q in qual if q['status'] == 'Passed')
         out.append({'sku': sku, 'start': start, 'steps': steps, 'qual': qual, 'samples': samples, 'qual_done': qual_done,
+                    'failed': failed, 'passed': done,
                     'first_demand': first_dem, 'need_date': need_date, 'risk': risk, 'fab_lead_months': lead_m,
                     'yield_cum': p.good_units_per_wafer(sku) / float(prod['GDPW']) * 100})
     return {'products': out}
@@ -1665,6 +1686,25 @@ def checks_view(p: Plan):
     for (v, sku, st) in p.cap:
         if (v, st) not in p.fleet and v in p.vendors:
             out.append(('error', 'tester_fleet', f'OSAT-{v} has test times for {sku} {st} but no {st} testers in the fleet.'))
+    for name in ('order_history', 'test_results'):
+        bad = sorted({r['SKU'] for r in t.get(name, []) if r['SKU'] not in known})
+        if bad:
+            out.append(('warning', name, f'{TABLES[name]["title"]} mentions products not in Products: {", ".join(bad[:6])}.'))
+    over = [r['LotID'] for r in t.get('test_results', []) if float(r['Passed'] or 0) > float(r['Tested'] or 0)]
+    if over:
+        out.append(('error', 'test_results', f'{len(over)} test result rows pass more units than they test (e.g. lot {over[0]}); fix Passed or Tested.'))
+    lots = {(r['Step'], r['LotID']) for r in t.get('test_results', [])}
+    orphan = sorted({r['LotID'] for r in t.get('test_bins', []) if (r['Step'], r['LotID']) not in lots})
+    if orphan:
+        out.append(('info', 'test_bins', f'{len(orphan)} lots have bin counts but no test result row (e.g. {orphan[0]}); they are left out of the bin Pareto.'))
+    for r in t.get('vendor_issues', []):
+        if r['Status'] == 'Closed' and not r.get('Closed'):
+            out.append(('warning', 'vendor_issues', f'Issue {r["IssueID"]} is Closed without a Closed date; it does not count toward days to close.'))
+        if r.get('Closed') and r.get('Opened') and str(r['Closed']) < str(r['Opened']):
+            out.append(('error', 'vendor_issues', f'Issue {r["IssueID"]} is closed before it was opened.'))
+    wsum = sum(float(r['WeightPct']) for r in t.get('qbr_weights', []))
+    if t.get('qbr_weights') and abs(wsum - 100) > 0.5:
+        out.append(('info', 'qbr_weights', f'QBR weights add up to {wsum:.0f}%; scores are weighted in proportion.'))
     shares = sum(float(r['SharePct']) for r in t['vendors'] if r['Enabled'] == 'Y')
     if t['vendors'] and abs(shares - 100) > 0.5:
         out.append(('info', 'vendors', f'Vendor shares add up to {shares:.0f}%; they are re-normalised per product.'))

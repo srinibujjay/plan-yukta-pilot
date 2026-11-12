@@ -603,19 +603,27 @@ def npi(R, args):
             marks.append((n['need_date'], 'customer need', 'need'))
         sections.append({'type': 'kpis', 'items': [
             K(f'{n["sku"]} samples ready', f'{n["samples"]:%d %b %Y}', 'first lots through every step'),
-            K('Qualification complete', f'{n["qual_done"]:%d %b %Y}', f'{len(n["qual"])} milestones', 'bad' if n['risk'] else 'ok'),
+            K('Qualification complete', f'{n["qual_done"]:%d %b %Y}', f'{n["passed"]} of {len(n["qual"])} milestones passed',
+              'bad' if n['risk'] else 'ok'),
             K('First customer demand', mlabel(n['first_demand']) if n['first_demand'] else '–', 'from the plan demand'),
             K('Cumulative yield', f'{n["yield_cum"]:.1f}%', 'good units per gross die'),
         ]})
-        if n['risk']:
+        if n['failed']:
+            sections.append(callout(f'<b>Failed:</b> {escape(", ".join(n["failed"]))}. Qualification is not complete until the fix is re-tested: '
+                                    f'add a re-test milestone (Order after the failed one) in the NPI qualification plan.', 'bad'))
+        if n['need_date'] and n['qual_done'] > n['need_date']:
             late = (n['qual_done'] - n['need_date']).days
             sections.append(callout(f'<b>Risk:</b> qualification ends {late} days after customers need {n["sku"]}. Options: start production at risk, '
                                     f'compress the longest tests (HTOL / HTSL), or agree a later first shipment.', 'bad'))
         sections.append(chart(f'{n["sku"]} timeline', charts.gantt(rows, n['start'] - timedelta(days=5), end + timedelta(days=10), marks),
                               'Blue: fab. Teal: OSAT steps. Orange: qualification tests, with readouts in grey.'))
-        sections.append(table(f'{n["sku"]} plan', [col('name', 'Step / milestone'), col('start', 'Start', 'date'), col('end', 'Finish', 'date'),
-                                                   col('readout', 'Readout done', 'date')],
-                              [dict(r, readout=r.get('readout')) for r in rows], search=False))
+        st_tone = {'Passed': 'ok', 'Running': 'info', 'Failed': 'bad', 'Planned': ''}
+        sections.append(table(f'{n["sku"]} plan', [col('status', 'Status', 'badge', tone='st_t'), col('name', 'Step / milestone'),
+                                                   col('start', 'Start', 'date'), col('end', 'Finish', 'date'),
+                                                   col('readout', 'Readout done', 'date'), col('slip', 'Slip days', 'int')],
+                              [dict(r, readout=r.get('readout'), status=r.get('status', 'Fab' if r['kind'] == 'fab' else 'OSAT'),
+                                    st_t=st_tone.get(r.get('status'), ''), slip=r.get('slip') or None) for r in rows], search=False,
+                              note='Set Status and ActualEnd in the NPI qualification plan as readouts come in: later milestones re-plan from the actual date.'))
     return page('npi', sections)
 
 
@@ -1308,3 +1316,348 @@ def flow_dashboard(R, args):
                           table('Totals by product', [col('sku', 'Product'), col('demand', 'Demand', 'int'), col('out', 'Pack output', 'int'),
                                                       col('ship', 'Shipped', 'int'), col('short', 'Peak short', 'int'), col('fill', 'Fill %', 'num1')], stot, search=False)))
     return page('flow-dashboard', sections, filters=filter_spec(R) + [('process', 'Process', FLOW_ORDER)])
+
+
+# ------------------------------------------------------------------ vendors, customers, test data, inventory
+def _e(v):
+    return escape('' if v is None else str(v))
+
+
+def _grade_tone(g):
+    return {'A': 'ok', 'B': 'info', 'C': 'warn', 'D': 'bad'}.get(g, '')
+
+
+def _chips(name, opts, sel, args, anchor=''):
+    keep = {k: v for k, v in args.items() if k not in (name, 'msg', 'err')}
+    q = lambda v: '&'.join(f'{escape(k)}={escape(str(x))}' for k, x in list(keep.items()) + [(name, v)])
+    return '<div class="chips">' + ''.join(
+        f'<a class="chip {"on" if str(v) == str(sel) else ""}" href="?{q(v)}{anchor}">{_e(lbl)}</a>' for v, lbl in opts) + '</div>'
+
+
+def vendor_qbr(R, args):
+    from . import insights as I
+    p = R['plan']
+    period = args.get('period') or 'L3'
+    Q = I.qbr_view(p, R, period)
+    S = Q['scores']
+    W_ = Q['weights']
+    sel = args.get('vendor') or ''
+    months_txt = (f'{mlabel(Q["months"][0])} – {mlabel(Q["months"][-1])}' if Q['months'] else 'no actuals yet')
+    sections = [html('<div class="panel-head"><span class="muted small">Review period</span>'
+                     + _chips('period', Q['periods'], period, args) + '</div>')]
+    best = S[0] if S else None
+    open_iss = [i for i in Q['issues'] if i['Status'] != 'Closed']
+    sections.append({'type': 'kpis', 'items': [
+        K('Top-ranked OSAT', f'OSAT-{best["vendor"]}' if best else '–', f'score {best["total"]:.1f} · grade {best["grade"]}' if best else '', 'ok'),
+        K('Lowest score', f'OSAT-{S[-1]["vendor"]} · {S[-1]["total"]:.1f}' if S else '–', f'grade {S[-1]["grade"]}' if S else '',
+          _grade_tone(S[-1]['grade']) if S else ''),
+        K('Open issues', str(len(open_iss)), f'{sum(1 for i in open_iss if i["overdue"])} overdue · '
+                                              f'{sum(1 for i in open_iss if i["Severity"] == "Critical")} critical',
+          'bad' if any(i['overdue'] for i in open_iss) else 'ok'),
+        K('Review period', months_txt, f'{len(Q["months"])} months of actuals and test data'),
+    ]})
+    # ranking table with category scores
+    rows = []
+    for d in S:
+        r = {'rank': d['rank'], 'vendor': f'OSAT-{d["vendor"]}', 'grade': d['grade'], 'g_t': _grade_tone(d['grade']), 'total': d['total'],
+             'open': d['open'], 'overdue': d['overdue']}
+        for c in I.CATS:
+            r[c] = d['scores'][c]
+        rows.append(r)
+    wtxt = ' · '.join(f'{c} {W_[c][0]:.0f}%' for c in I.CATS)
+    sections.append(table('Vendor ranking', [col('rank', '#', 'int'), col('vendor', 'OSAT'), col('grade', 'Grade', 'badge', tone='g_t'),
+                                             col('total', 'Score', 'num1')] + [col(c, c, 'num0') for c in I.CATS] +
+                          [col('open', 'Open issues', 'int'), col('overdue', 'Overdue', 'int')], rows, search=False,
+                          note=f'Weights: {wtxt}. Each category scores 100 at or above its target and loses {I.POINTS_PER_PCT} points per % below it. '
+                               f'Grades: A ≥ 90, B ≥ 80, C ≥ 70, D below. Change weights and targets in QBR scorecard weights.'))
+    if Q['trend_months'] and S:
+        series = [(f'OSAT-{v}', Q['trend'][v], False) for v in sorted(Q['trend'])]
+        lo_ = min([x for v in Q['trend'].values() for x in v] + [100])
+        sections.append(chart('Score by month', charts.lines(Q['trend_months'], series, vmin=max(0, int(lo_ // 5) * 5 - 5), dec=0, title='QBR score'),
+                              'Quality and delivery from each month\'s actuals; cost, capacity and responsiveness as of today.'))
+    # measures behind the scores
+    meas = []
+    for d in S:
+        v = d['values']
+        meas.append({'vendor': f'OSAT-{d["vendor"]}', 'yr': d['yield_ratio'], 'qp': d['quality_pct'], 'del': v['Delivery'], 'cost': v['Cost'],
+                     'ci': d['cost_items'], 'cap': v['Capacity'], 'late': d['cap_late'], 'close': d['avg_close'], 'iss': d['issues']})
+    sections.append(table('What the scores are made of', [col('vendor', 'OSAT'), col('yr', 'Test yield vs plan %', 'num1'),
+                                                          col('qp', 'Reported quality %', 'num1'), col('del', 'Delivered vs plan %', 'num1'),
+                                                          col('cost', 'Price index', 'num1'), col('ci', 'Items compared', 'int'),
+                                                          col('cap', 'Forward load on time %', 'num1'), col('late', 'Units late', 'int'),
+                                                          col('close', 'Avg days to close', 'num1'), col('iss', 'Issues logged', 'int')],
+                          meas, search=False,
+                          note='Quality = average of test yield ÷ planned yield (Post-Silicon data) and reported quality % (Vendor actuals). '
+                               'Price index = lowest quote ÷ this OSAT\'s quote for the same step and product, averaged. '
+                               'Capacity looks forward: share of the planned test load made in its month or pulled in ahead.'))
+    if Q['actions']:
+        sections.append(table('Agenda for the QBR', [col('vendor', 'OSAT'), col('category', 'Category'), col('score', 'Score', 'num0'),
+                                                     col('why', 'Why'), col('action', 'Ask the vendor')],
+                              [dict(a, vendor=f'OSAT-{a["vendor"]}') for a in sorted(Q['actions'], key=lambda a: a['score'])], search=False))
+    # issues log
+    vend_opts = sorted({*p.vendors, 'FAB'})
+    iss = [i for i in Q['issues'] if not sel or i['Vendor'] == sel]
+    st = args.get('status') or ''
+    if st:
+        iss = [i for i in iss if (i['Status'] != 'Closed') == (st == 'open')]
+    iss.sort(key=lambda i: (i['Status'] == 'Closed', {'Critical': 0, 'Major': 1, 'Minor': 2}.get(i['Severity'], 3), str(i['Opened'])))
+    trs = []
+    for i in iss:
+        tone = 'ok' if i['Status'] == 'Closed' else ('bad' if i['overdue'] or i['Severity'] == 'Critical' else 'warn')
+        status = i['Status'] + (' · overdue' if i['overdue'] else '')
+        btn = '' if i['Status'] == 'Closed' else (
+            f'<form method="post" action="/qbr/issue/close" class="closeform"><input type="hidden" name="id" value="{_e(i["IssueID"])}">'
+            f'<input name="root" placeholder="Root cause" maxlength="160" value="{_e(i.get("RootCause"))}" aria-label="Root cause">'
+            f'<button class="btn sm" type="submit">Close</button></form>')
+        trs.append(f'<tr><td class="nw">{_e(i["IssueID"])}</td><td>{"FAB" if i["Vendor"] == "FAB" else "OSAT-" + _e(i["Vendor"])}</td>'
+                   f'<td><span class="badge {tone}">{_e(status)}</span></td><td><span class="badge {"bad" if i["Severity"] == "Critical" else "warn" if i["Severity"] == "Major" else "info"}">{_e(i["Severity"])}</span></td>'
+                   f'<td>{_e(i["Category"])}</td><td class="wrap">{_e(i["Title"])}</td><td>{_e(i.get("SKU"))}</td>'
+                   f'<td class="nw">{_e(i["Opened"])}</td><td class="nw">{_e(i.get("Due"))}</td>'
+                   f'<td class="r nw">{i["days_to_close"] if i["days_to_close"] is not None else (str(i["age"]) + " open" if i["age"] is not None else "")}</td>'
+                   f'<td class="wrap small">{_e(i.get("RootCause"))}{" → " if i.get("RootCause") and i.get("Action") else ""}{_e(i.get("Action"))}</td>'
+                   f'<td>{btn}</td></tr>')
+    filt = ('<div class="panel-head"><h2>Issues log</h2><div class="chips">'
+            + ''.join(f'<a class="chip {"on" if sel == v else ""}" href="?period={_e(period)}&vendor={_e(v)}&status={_e(st)}#issues">'
+                      f'{"FAB" if v == "FAB" else "OSAT-" + _e(v)}</a>' for v in vend_opts)
+            + f'<a class="chip {"on" if not sel else ""}" href="?period={_e(period)}&status={_e(st)}#issues">All</a>'
+            + f'<a class="chip {"on" if st == "open" else ""}" href="?period={_e(period)}&vendor={_e(sel)}&status=open#issues">Open only</a>'
+            + f'<a class="chip {"on" if st == "closed" else ""}" href="?period={_e(period)}&vendor={_e(sel)}&status=closed#issues">Closed</a></div></div>')
+    today = p.as_of
+    vend_html = ''.join(f'<option value="{_e(v)}">{"FAB" if v == "FAB" else "OSAT-" + _e(v)}</option>' for v in vend_opts)
+    form = (f'<details class="addform"><summary class="btn ghost sm">+ Log a new issue</summary>'
+            f'<form method="post" action="/qbr/issue/add" class="formgrid" style="margin-top:12px">'
+            f'<label>Supplier<select name="Vendor">{vend_html}</select></label>'
+            f'<label>Category<select name="Category">{"".join(f"<option>{c}</option>" for c in ["Quality", "Delivery", "Capacity", "Cost", "Communication"])}</select></label>'
+            f'<label>Severity<select name="Severity"><option>Major</option><option>Critical</option><option>Minor</option></select></label>'
+            f'<label>Product<select name="SKU"><option value="">(all)</option>{"".join(f"<option>{_e(s)}</option>" for s in p.products)}</select></label>'
+            f'<label>Opened<input type="date" name="Opened" value="{today:%Y-%m-%d}"></label>'
+            f'<label>Due<input type="date" name="Due" value="{today + timedelta(days=14):%Y-%m-%d}"></label>'
+            f'<label style="grid-column:span 2">What happened<input name="Title" maxlength="160" required placeholder="e.g. Final test 1 yield drop on two lots"></label>'
+            f'<label>Owner<input name="Owner" maxlength="60"></label>'
+            f'<label style="grid-column:span 2">Containment / action<input name="Action" maxlength="200"></label>'
+            f'<div><button class="btn" type="submit">Add issue</button></div></form></details>')
+    sections.append(html(f'<section class="panel" id="issues">{filt}<p class="sub">8D-style log. Days to close and open, overdue or critical issues feed the '
+                         f'Responsiveness score. Edit every field in the <a href="/data/vendor_issues">Vendor issues log</a> table.</p>{form}'
+                         f'<div class="tablewrap tall" style="margin-top:12px"><table><thead><tr><th>ID</th><th>Supplier</th><th>Status</th><th>Severity</th>'
+                         f'<th>Category</th><th>Issue</th><th>Product</th><th>Opened</th><th>Due</th><th class="r">Days</th><th>Root cause → action</th><th></th></tr></thead>'
+                         f'<tbody>{"".join(trs) or "<tr><td colspan=12 class=muted>No issues.</td></tr>"}</tbody></table></div></section>'))
+    packs = ''.join(f'<a class="btn ghost sm" href="/export/qbr-{_e(d["vendor"])}.xlsx?period={_e(period)}">QBR pack · OSAT-{_e(d["vendor"])}</a>' for d in S)
+    sections.insert(1, html(f'<div class="actions">{packs}<span class="muted small">Excel pack per vendor: scorecard, measures, agenda and issues, ready to send before the review.</span></div>'))
+    return page('vendor-qbr', sections)
+
+
+def customers(R, args):
+    from . import insights as I
+    p = R['plan']
+    C_ = I.customer_view(p, R)
+    cs = C_['customers']
+    tone = {'Excellent': 'ok', 'Good': 'info', 'Fair': 'warn', 'Risk': 'bad'}
+    at_risk = sum(c['at_risk_qty'] for c in cs)
+    at_rev = sum(c['at_risk_rev'] for c in cs)
+    worst = min((c for c in cs if c['score'] is not None), key=lambda c: c['score'], default=None)
+    sections = [{'type': 'kpis', 'items': [
+        K('Customers rated', str(sum(1 for c in cs if c['score'] is not None)), f'{len(C_["history"])} agreed orders since {mlabel(C_["months"][0])}' if C_['months'] else ''),
+        K('Agreed orders taken as agreed', f'{sum(c["accept_pct"] * c["agreed"] for c in cs) / (sum(c["agreed"] for c in cs) or 1):.1f}%', 'by quantity, incl. pull-ins'),
+        K('Lowest rating', f'{worst["customer"]}' if worst else '–', f'{worst["score"]:.0f} · {worst["rating"]}' if worst else '', tone.get(worst['rating'], '') if worst else ''),
+        K('Open orders at risk', short(at_risk), f'{money(at_rev)} revenue likely to move or drop', 'warn' if at_risk else 'ok'),
+    ]}]
+    rows = [dict(c, r_t=tone.get(c['rating'], '')) for c in cs]
+    sections.append(table('Customer rating', [col('customer', 'Customer'), col('rating', 'Rating', 'badge', tone='r_t'), col('score', 'Score', 'num1'),
+                                              col('orders', 'Agreed orders', 'int'), col('accept_pct', 'Taken as agreed %', 'num1'),
+                                              col('push_pct', 'Pushed out %', 'num1'), col('cancel_pct', 'Cancelled %', 'num1'),
+                                              col('reduce_pct', 'Reduced %', 'num1'), col('pullin_n', 'Pull-ins', 'int'),
+                                              col('avg_push_months', 'Avg push (months)', 'num1')], rows, search=False,
+                          note='Score = 100 − (pushed-out % × 0.6 + cancelled % × 1.0 + reduced % × 0.8), all by agreed quantity. '
+                               'Excellent ≥ 95, Good ≥ 85, Fair ≥ 70, Risk below. Pull-ins are counted but not penalised.'))
+    names = [c['customer'] for c in cs]
+    outs = ['Accepted', 'Pulled in', 'Pushed out', 'Reduced', 'Cancelled']
+    hist = C_['history']
+    series = [(o, [sum(float(r['AgreedQty']) for r in hist if r['Customer'] == n and r['Outcome'] == o) for n in names]) for o in outs]
+    if names:
+        sections.append(cols2(chart('What happened to agreed quantity', charts.bars(names, series, title='Outcome by customer')),
+                              chart('Open orders: likely as agreed vs at risk',
+                                    charts.bars(names, [('Likely as agreed', [c['risk_adj_qty'] for c in cs]), ('At risk', [c['at_risk_qty'] for c in cs])],
+                                                title='Risk-adjusted open orders'),
+                                    'Open orders × each customer\'s history of taking orders as agreed.')))
+    sections.append(table('Open orders, risk-adjusted', [col('customer', 'Customer'), col('rating', 'Rating', 'badge', tone='r_t'),
+                                                         col('open_qty', 'Open order units', 'int'), col('risk_adj_qty', 'Likely as agreed', 'int'),
+                                                         col('at_risk_qty', 'At risk', 'int'), col('open_rev', 'Open revenue', 'money'),
+                                                         col('at_risk_rev', 'Revenue at risk', 'money'), col('policy', 'Commit policy')], rows, search=False,
+                          note='Use it when committing scarce tester time or long-lead wafers: build ahead for Excellent customers, '
+                               'ask Fair and Risk customers for firm or NCNR orders first.'))
+    cust = args.get('customer') or ''
+    hrows = [dict(r, o_t=('ok' if r['Outcome'] in ('Accepted', 'Pulled in') else 'bad' if r['Outcome'] == 'Cancelled' else 'warn'))
+             for r in hist if not cust or r['Customer'] == cust]
+    sections.append(table('Agreed-order history', [col('OrderID', 'Order'), col('Customer', 'Customer'), col('SKU', 'Product'),
+                                                   col('AgreedMonth', 'Agreed month', 'month'), col('AgreedQty', 'Agreed qty', 'int'),
+                                                   col('Outcome', 'Outcome', 'badge', tone='o_t'), col('ActualMonth', 'Actual month', 'month'),
+                                                   col('ActualQty', 'Actual qty', 'int'), col('Reason', 'Reason')], hrows,
+                          note='Edit or upload in the Agreed-order history table.'))
+    return page('customers', sections, filters=[('customer', 'Customer', names)])
+
+
+def postsilicon(R, args, token=None, base_url=''):
+    from . import insights as I
+    p = R['plan']
+    P = I.postsilicon_view(p, args.get('sku'), args.get('step') or 'Test1', args.get('vendor') or None)
+    if not P['sku']:
+        return page('postsilicon', [callout('No test results yet. Upload lot results to Test results (lot / wafer), or send them to the test-data API below.')]
+                    + [_api_panel(token, base_url)])
+    lots = P['lots']
+    py = P['plan_y']
+    sections = [html('<div class="panel-head"><span class="muted small">Product</span>' + _chips('sku', [(s, s) for s in P['skus']], P['sku'], args)
+                     + '<span class="muted small">Step</span>' + _chips('step', [(s, s) for s in P['steps']], P['step'], args)
+                     + '<span class="muted small">OSAT</span>' + _chips('vendor', [('', 'All')] + [(v, f'OSAT-{v}') for v in sorted({l["vendor"] for l in I.lots_of(p, P["sku"], P["step"])})], P['vendor'] or '', args)
+                     + '</div>')]
+    below = [l for l in lots if l['flag'] == 'Below LCL']
+    tested = sum(l['tested'] for l in lots)
+    yall = sum(l['passed'] for l in lots) / tested * 100 if tested else 0
+    sections.append({'type': 'kpis', 'items': [
+        K(f'{P["sku"]} {P["step"]} yield', f'{yall:.2f}%', f'{len(lots)} lots · {short(tested)} {"wafers" if P["step"] == "Sort" else "units"} tested'),
+        K('Plan yield', f'{py * 100:.1f}%' if py else '–', f'{(yall - py * 100):+.2f} pts actual vs plan' if py else '',
+          'ok' if py and yall >= py * 100 - 0.5 else 'warn'),
+        K('Control limits', f'{P["lcl"] * 100:.1f}% – {P["ucl"] * 100:.1f}%' if P['lcl'] is not None else '–', f'median ± {P["k"]:.0f} robust σ'),
+        K('Alerts', str(len(P['alerts'])), f'{len(below)} lots below LCL', 'bad' if P['alerts'] else 'ok'),
+    ]})
+    if lots:
+        labs = [l['date'] for l in lots]
+        ys = [l['yield'] * 100 for l in lots]
+        ser = [('Lot yield', ys, False), ('Median', [P['mean'] * 100] * len(lots), True), ('LCL', [P['lcl'] * 100] * len(lots), True),
+               ('UCL', [P['ucl'] * 100] * len(lots), True)]
+        if py:
+            ser.append(('Plan', [py * 100] * len(lots), False))
+        lo = min(ys + [P['lcl'] * 100, (py or 1) * 100]) - 1
+        sections.append(chart(f'{P["sku"]} {P["step"]} lot yield (control chart)',
+                              charts.lines(labs, ser, vmin=max(0, lo), dec=1, unit='%', xlab=lambda d: d[5:], title='Lot yield'),
+                              'Each dot is a lot, in test-date order. Limits use the median and a robust sigma (1.4826 × MAD), so an excursion does not widen its own limits.'))
+    al = [dict(a, k_t=('bad' if a['kind'] != 'Tester outlier' else 'warn')) for a in P['alerts']]
+    sections.append(table('Alerts', [col('kind', 'Alert', 'badge', tone='k_t'), col('vendor', 'OSAT'), col('lot', 'Lot'), col('date', 'Tested'),
+                                     col('tester', 'Tester'), col('yield', 'Yield %', 'num1'), col('signature', 'What the data says')],
+                          al, search=False, empty='No lot below the lower control limit and no tester outlier.'))
+    # actions: use actual yield / bins in the plan
+    acts = []
+    for v in P['vendors']:
+        if v['trailing'] is None or not py:
+            continue
+        py_v = p.yld(P['sku'], v['vendor'], P['step'], PAD)        # what the plan uses in its first month (after overrides)
+        later = [o for o in p.overrides.get((P['sku'], v['vendor'], P['step']), []) if o['EffectiveMonth'] > p.start]
+        later_txt = ''.join(f'; plan changes to {float(o["Yield"]) * 100:.1f}% from {mlabel(o["EffectiveMonth"])}' for o in later[:2])
+        diff = (v['trailing'] - py_v) * 100
+        if abs(diff) >= 1.0:
+            acts.append(f'<form method="post" action="/postsilicon/use-yield" class="actrow"><input type="hidden" name="sku" value="{_e(P["sku"])}">'
+                        f'<input type="hidden" name="vendor" value="{_e(v["vendor"])}"><input type="hidden" name="step" value="{_e(P["step"])}">'
+                        f'<input type="hidden" name="yield" value="{v["trailing"]:.4f}">'
+                        f'<span>OSAT-{_e(v["vendor"])}: last {v["n_trailing"]} lots <b>{v["trailing"] * 100:.1f}%</b>, plan uses {py_v * 100:.1f}% in {mlabel(p.start)} '
+                        f'({diff:+.1f} pts){_e(later_txt)}</span>'
+                        f'<button class="btn sm" type="submit">Use {v["trailing"] * 100:.1f}% in the plan from {mlabel(p.start)}</button></form>')
+    bs = [b for b in P['bin_split'] if b['delta'] is not None]
+    if bs and max(abs(b['delta']) for b in bs) >= 1.0:
+        acts.append(f'<form method="post" action="/postsilicon/use-bins" class="actrow"><input type="hidden" name="sku" value="{_e(P["sku"])}">'
+                    f'<input type="hidden" name="step" value="{_e(P["step"])}"><span>Bin split differs from plan by up to '
+                    f'{max(abs(b["delta"]) for b in bs):.1f} pts</span><button class="btn sm" type="submit">Update {_e(P["sku"])} bin splits from actuals</button></form>')
+    sections.append(html('<section class="panel"><h2>Feed the plan</h2><p class="sub">Turn what the test data shows into the plan: a yield override from the trailing '
+                         'five-lot mean (start counts, tester load and wafer starts all re-plan), or bin splits from the actual pass-bin mix (ATP and P&amp;L by bin).</p>'
+                         + (''.join(acts) or '<p class="muted small">Actual yields and bin splits are within 1 point of the plan: nothing to change.</p>')
+                         + '</section>'))
+    vrows = [dict(v, vendor=f'OSAT-{v["vendor"]}', trailing=(v['trailing'] * 100 if v['trailing'] is not None else None)) for v in P['vendors']]
+    trows = [dict(t, vendor=f'OSAT-{t["vendor"]}', f_t=('warn' if t['flag'] != 'OK' else 'ok')) for t in P['testers']]
+    sections.append(cols2(table('By OSAT', [col('vendor', 'OSAT'), col('lots', 'Lots', 'int'), col('tested', 'Tested', 'int'),
+                                             col('yield', 'Yield %', 'num2'), col('vs_plan', 'vs plan (pts)', 'num2'),
+                                             col('trailing', 'Last 5 lots %', 'num2')], vrows, search=False),
+                          table('By tester', [col('vendor', 'OSAT'), col('tester', 'Tester'), col('lots', 'Lots', 'int'), col('yield', 'Yield %', 'num2'),
+                                              col('vs_others', 'vs other testers (pts)', 'num2'), col('flag', 'Flag', 'badge', tone='f_t')],
+                                trows, search=False, note='Outlier = 1.5 pts or more below the rest of the OSAT over 3+ lots. '
+                                                          'Lots with their own failure signature are left out so a lot problem is not blamed on a tester.')))
+    if P['pareto']:
+        pl = [r['bin'] + ' ' + r['desc'] for r in P['pareto']]
+        sections.append(cols2(
+            chart('Fail-bin Pareto', charts.bars(pl, [('Units', [r['count'] for r in P['pareto']])], title='Fail bins'),
+                  ' · '.join(f'{r["bin"]} {r["share"]:.0f}% (cum. {r["cum"]:.0f}%)' for r in P['pareto'])),
+            table('Pass-bin split: actual vs plan', [col('bin', 'Bin'), col('desc', 'Grade'), col('actual', 'Actual %', 'num1'),
+                                                     col('plan', 'Plan %', 'num1'), col('delta', 'Difference (pts)', 'num1')],
+                  P['bin_split'], search=False, note='Plan = Bin splits table. ATP and revenue by bin use the plan split.')))
+    if P['months']:
+        lim = py * 100 - 1.5 if py else None
+        g = [{'title': 'Yield % by test month',
+              'rows': [{'label': f'OSAT-{v}', 'cells': [((f'{x:.1f}%' if x is not None else '–'),
+                                                         ('' if x is None else 'bad' if lim and x < lim else 'ok')) for x in P['monthly'][v]]}
+                       for v in sorted(P['monthly'])]}]
+        sections.append(grid('Monthly yield', P['months'], g, f'Red: more than 1.5 pts below the plan yield of {py * 100:.1f}%.' if py else ''))
+    lrows = [dict(l, yield_p=l['yield'] * 100, vendor=f'OSAT-{l["vendor"]}', f_t=('bad' if l['flag'] == 'Below LCL' else 'warn' if l['flag'] != 'OK' else 'ok'))
+             for l in reversed(lots)]
+    sections.append(table('Lots', [col('flag', 'Flag', 'badge', tone='f_t'), col('date', 'Tested'), col('lot', 'Lot'), col('vendor', 'OSAT'),
+                                   col('tester', 'Tester'), col('tested', 'Tested', 'int'), col('passed', 'Passed', 'int'),
+                                   col('yield_p', 'Yield %', 'num2'), col('vs_plan', 'vs plan (pts)', 'num2')], lrows, limit=60))
+    sections.append(_api_panel(token, base_url))
+    return page('postsilicon', sections)
+
+
+def _api_panel(token, base_url):
+    tok = escape(token or '<token>')
+    url = escape((base_url or '').rstrip('/') + '/api/v1/test-results')
+    body = ('{"results": [{"TestDate": "2026-11-09", "Vendor": "A", "SKU": "ORION", "Step": "Test1", "LotID": "LOT1001", '
+            '"WaferID": "-", "TesterID": "T7-A01", "Tested": 90000, "Passed": 83000}],\n  "bins": [{"Step": "Test1", "LotID": "LOT1001", '
+            '"Bin": "HB5", "Count": 4100, "Pass": "N", "Description": "Continuity / open-short"}]}')
+    return html(f'<section class="panel" id="api"><h2>Test-data API</h2>'
+                f'<p class="sub">Push lot results from your yield-analytics or test-data tool (an export job from a commercial yield-analytics platform, '
+                f'an OSAT MES feed, or a script over STDF summaries) straight into this workspace. Rows with the same Step + LotID + WaferID '
+                f'(results) or Step + LotID + Bin (bins) replace the old row; everything is validated like an upload. '
+                f'This is a generic JSON endpoint; there is no vendor-specific connector.</p>'
+                f'<pre class="code">curl -X POST {url} \\\n  -H "Authorization: Bearer {tok}" \\\n  -H "Content-Type: application/json" \\\n'
+                f'  -d \'{escape(body)}\'</pre>'
+                f'<p class="muted small">The token is tied to this browser\'s workspace (it ends when the workspace expires). GET the same URL with the token to read back a count. '
+                f'Up to 5,000 rows per call. Answer: <code>{{"results_added": n, "bins_added": n, "errors": [...]}}</code>.</p></section>')
+
+
+def inventory(R, args):
+    from . import insights as I
+    p = R['plan']
+    V = I.inventory_view(p, R)
+    P_ = V['products']
+    tot = sum(x['value'] for x in P_)
+    exc = sum(x['excess_value'] for x in P_)
+    obs = sum(x['obsolete_value'] for x in P_)
+    hold = sum(x['hold_value'] for x in P_)
+    sections = [{'type': 'kpis', 'items': [
+        K('Inventory value', money(tot), 'WIP and finished goods at standard cost'),
+        K('Excess', money(exc), f'above {V["weeks"]:.0f} weeks of demand + cycle time', 'warn' if exc else 'ok'),
+        K('Obsolete risk', money(obs), f'date code older than {V["obs_months"]:.0f} months', 'bad' if obs else 'ok'),
+        K('On hold', money(hold), 'lots with State = HOLD', 'warn' if hold else 'ok'),
+    ]}]
+    rows = [dict(x, dos_t=('–' if x['dos'] is None else ('no demand' if x['dos'] == float('inf') else f'{x["dos"]:.0f}')),
+                 d_t=('bad' if x['excess'] > 0 and x['obsolete_value'] > 0 else 'warn' if x['excess'] > 0 else 'ok')) for x in P_ if x['inv'] > 0 or x['demand3'] > 0]
+    sections.append(table('Inventory health by product', [col('sku', 'Product'), col('status', 'Status'), col('fg', 'FG units', 'int'),
+                                                          col('wip', 'WIP (FG-equivalent)', 'int'), col('demand3', 'Demand / month', 'int'),
+                                                          col('dos_t', 'Days of supply', 'badge', tone='d_t'), col('value', 'Value', 'money'),
+                                                          col('excess', f'Excess units', 'int'), col('excess_value', 'Excess value', 'money'),
+                                                          col('obsolete_value', 'Obsolete-risk value', 'money')], rows, search=False,
+                          note='WIP is converted to the finished units it should still yield. Days of supply walk the plan demand month by month. '
+                               'Excess = finished + WIP above the demand of the next threshold weeks plus the product\'s cycle time (WIP still has to flow), '
+                               'valued at standard cost (finished goods first).'))
+    skus = [x['sku'] for x in P_ if x['value'] > 0]
+    stages = ['Sort', 'Bump', 'DieBank', 'Assembly', 'Test1', 'Test2', 'Pack', 'FG']
+    ser = [(s, [V['stage'].get((k, s), 0) for k in skus]) for s in stages if any(V['stage'].get((k, s), 0) for k in skus)]
+    order = ['0-3 months', '3-6 months', '6-12 months', '12+ months', 'Obsolete risk', 'No date code']
+    ag = [(a, V['aging'][a]) for a in order if V['aging'].get(a)]
+    if skus:
+        sections.append(cols2(chart('Value by stage', charts.bars(skus, ser, unit=' USD', title='Inventory value by stage')),
+                              chart('Aging by date code', charts.donut(ag, title='Aging', unit=' USD'), 'Value by age of the lot date code (YYWW).')))
+    acts = []
+    for x in P_:
+        if x['obsolete_value'] > 0:
+            acts.append({'sku': x['sku'], 'what': f'{short(x["obsolete_qty"])} units ({money(x["obsolete_value"])}) are older than {V["obs_months"]:.0f} months',
+                         'action': 'Offer to the last-time-buy customer at a discount, check re-qualification of the date code, or reserve and scrap.'})
+        if x['excess'] > 0:
+            acts.append({'sku': x['sku'], 'what': f'{short(x["excess"])} units ({money(x["excess_value"])}) above {V["weeks"]:.0f} weeks of demand',
+                         'action': ('Stop new wafer starts for this product until stock falls below the threshold; check FAB PO Schedule.'
+                                    if x['status'] != 'EOL' else 'EOL: cancel open wafer and OSAT orders, sell down the stock, then set a scrap date.')})
+    sections.append(table('Actions', [col('sku', 'Product'), col('what', 'Finding'), col('action', 'Action')], acts, search=False,
+                          empty='No excess or obsolete stock.'))
+    lots = apply_filters([dict(l, vendor_n=f'OSAT-{l["vendor"]}', a_t=('bad' if l['aging'] == 'Obsolete risk' else 'warn' if l['aging'] in ('12+ months', '6-12 months') else 'ok'))
+                          for l in V['lots']], args)
+    lots.sort(key=lambda l: -(l['age'] or 0))
+    sections.append(table('Lots', [col('aging', 'Age', 'badge', tone='a_t'), col('lot', 'Lot'), col('vendor_n', 'OSAT'), col('sku', 'Product'),
+                                   col('stage', 'Stage'), col('state', 'State'), col('qty', 'Qty', 'int'), col('unit', 'Unit'),
+                                   col('fg_eq', 'FG-equivalent', 'int'), col('complete', 'Cost complete %', 'num0'), col('value', 'Value', 'money'),
+                                   col('datecode', 'Date code')], lots, limit=80))
+    return page('inventory', sections, filters=filter_spec(R))

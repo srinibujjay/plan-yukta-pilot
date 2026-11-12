@@ -97,23 +97,28 @@ def bars(labels, series, stacked=True, height=220, unit='', lines=None, ref=None
     return '<figure class="fig">' + ''.join(out) + f'<figcaption class="legend">{leg}</figcaption></figure>'
 
 
-def lines(labels, series, height=220, unit='', split_at=None, title=''):
-    """series: [(name, values, dashed)]; split_at: index where the forecast starts."""
+def lines(labels, series, height=220, unit='', split_at=None, title='', vmin=None, xlab=None, dec=0):
+    """series: [(name, values, dashed)]; split_at: index where the forecast starts.
+    vmin: bottom of the y axis (default 0); xlab: function for x labels; dec: decimals in tooltips and axis."""
     W, H, L, R, T, B = 760, height, 52, 12, 14, 30
     n = len(labels) or 1
     vals = [v for _, vs, _ in series for v in vs if v is not None]
-    vmax = _nice_max(max(vals + [0]) * 1.08)
+    lo = 0 if vmin is None else vmin
+    vmax = _nice_max(max(vals + [0]) * 1.08) if vmin is None else max(vals + [lo + 1e-9]) + (max(vals + [lo]) - lo) * 0.08
     x = lambda i: L + (W - L - R) * (i / max(1, n - 1))
-    y = lambda v: T + (H - T - B) * (1 - v / vmax)
+    y = lambda v: T + (H - T - B) * (1 - (v - lo) / ((vmax - lo) or 1))
+    xl = xlab or _mlabel
+    vf = (lambda v: f'{v:.{dec}f}') if dec else _fmt
     out = [f'<svg class="chart" viewBox="0 0 {W} {H}" role="img" aria-label="{escape(title)}">']
     for t in (0, .25, .5, .75, 1):
-        yy = y(vmax * t)
+        vv = lo + (vmax - lo) * t
+        yy = y(vv)
         out.append(f'<line class="grid" x1="{L}" x2="{W - R}" y1="{yy:.1f}" y2="{yy:.1f}"/>'
-                   f'<text class="ax" x="{L - 6}" y="{yy + 4:.1f}" text-anchor="end">{_fmt(vmax * t)}</text>')
+                   f'<text class="ax" x="{L - 6}" y="{yy + 4:.1f}" text-anchor="end">{vf(vv)}</text>')
     step = max(1, n // 12)
     for i, lab in enumerate(labels):
         if i % step == 0:
-            out.append(f'<text class="ax" x="{x(i):.1f}" y="{H - 10}" text-anchor="middle">{escape(_mlabel(lab))}</text>')
+            out.append(f'<text class="ax" x="{x(i):.1f}" y="{H - 10}" text-anchor="middle">{escape(xl(lab))}</text>')
     if split_at is not None and 0 < split_at < n:
         xx = (x(split_at - 1) + x(split_at)) / 2
         out.append(f'<line class="now" x1="{xx:.1f}" x2="{xx:.1f}" y1="{T}" y2="{H - B}"/>'
@@ -124,9 +129,11 @@ def lines(labels, series, height=220, unit='', split_at=None, title=''):
             d = ' '.join(f'{x(i):.1f},{y(v):.1f}' for i, v in pts)
             dash = ' stroke-dasharray="5 4"' if dashed else ''
             out.append(f'<polyline class="ln l{si + 1}" fill="none" points="{d}"{dash}><title>{escape(name)}</title></polyline>')
+        if len(pts) > 2 and len({v for _, v in pts}) == 1:
+            continue          # constant reference line (limit, target): no dots
         for i, v in pts:
             out.append(f'<circle class="dot l{si + 1}" cx="{x(i):.1f}" cy="{y(v):.1f}" r="2.6">'
-                       f'<title>{escape(name)} · {escape(_mlabel(labels[i]))}: {v:,.0f}{unit}</title></circle>')
+                       f'<title>{escape(name)} · {escape(xl(labels[i]))}: {v:,.{dec}f}{unit}</title></circle>')
     out.append('</svg>')
     leg = ''.join(f'<span><i class="sw ln-sw l{i + 1}{" dashed" if d else ""}"></i>{escape(n_)}</span>' for i, (n_, _, d) in enumerate(series))
     return '<figure class="fig">' + ''.join(out) + f'<figcaption class="legend">{leg}</figcaption></figure>'

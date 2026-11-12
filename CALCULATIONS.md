@@ -153,7 +153,7 @@ Need = die into assembly, for products whose SubstrateType is not None. Batches 
 
 - **Hardware-ready testers** = min over hardware types of ⌊(in service + on order once arrived) ÷ per tester⌋.
 - **ATE economics**: units moved = min(average non-consignee units per month, new testers × units one tester makes for the current product mix); monthly saving = units moved × (non-consignee − consignee rate) − testers × running cost; payback = price × testers ÷ monthly saving; NPV = −price × testers + Σ saving ÷ (1 + r/12)^t.
-- **NPI**: samples ready = NPI start + fab cycle + transit + Σ OSAT cycle days; qualification end = samples + Σ (cycle + readout days); risk when qualification ends after the first month with demand.
+- **NPI**: samples ready = NPI start + fab cycle + transit + Σ OSAT cycle days; qualification end = samples + Σ (cycle + readout days); risk when qualification ends after the first month with demand. Each milestone has a Status (Planned / Running / Passed / Failed) and an ActualEnd date: an ActualEnd replaces the planned readout and every later milestone re-plans from it; a Running milestone past its planned readout cannot finish before the as-of date; a Failed milestone flags the product at risk until a re-test milestone is added.
 - **Plan vs actual**: attainment = actual ÷ frozen plan; OEE = availability × performance × quality; reliability score = 50% attainment (capped at 100) + 30% OEE + 20% (100 − disruption days ÷ 30.4 × 100).
 
 ## 14. Cross flow
@@ -165,9 +165,49 @@ Moved quantity = step output at the source OSAT × rule %; logistics cost = move
 - **Module 1 Dashboard:** production by OSAT and product, gap vs pull-in by month, cumulative forecast / demand / shipments, tester-months used. Recovery action for a short month: if another OSAT qualified for the product has idle testers covering at least 30% of the gap, move the load there; otherwise add ⌈gap ÷ units per tester-month⌉ testers. Vendor split optimisation spreads each product's Test 1 shortfall over OSATs with idle capacity in the short months, in proportion to that capacity.
 - **Module 4 Dashboard:** output (Pack) by OSAT and product, starts by process and month, OSAT wafer starts against fab starts, fill rate by product.
 
-## 16. Data checks
+## 16. Vendor QBR scorecard
 
-Errors and warnings that change or stop the plan: products without a flow or without qualified OSATs, test times without testers, bin fractions that do not add up to 1, unmapped WIP lots, missing prices, cross-flow rules over 100%, and references to unknown products or vendors.
+Per enabled OSAT, over the review period (last 3 months of actuals, or a quarter):
+
+| Category | Measure | Score |
+|---|---|---|
+| Quality | average of test yield ÷ planned yield (Σ passed ÷ Σ tested × base yield, capped at 100%) and average reported QualityPct | 100 at or above target, −5 points per % below |
+| Delivery | Σ min(actual, plan) ÷ Σ plan, from Vendor actuals and the frozen plan | same |
+| Cost | price index: for every step and product quoted by two or more OSATs (OSAT price list, consignee test rate), lowest price ÷ this OSAT's price × 100, averaged | same |
+| Capacity | (planned test load − units still short after pull-in) ÷ planned test load over the horizon | same |
+| Responsiveness | average days from Opened to Closed | 100 at or under target days, −3 per day over; −10 per overdue open issue, −15 per open critical issue |
+
+Total = Σ score × weight ÷ Σ weights of the categories with data (QBR scorecard weights). Grade A ≥ 90, B ≥ 80, C ≥ 70, D below. The monthly trend recomputes quality and delivery for each month. Any category under 90 goes onto the QBR agenda with the measure behind it. The QBR pack (Excel) keeps weights and category scores as inputs and the total and grade as live formulas.
+
+## 17. Customer rating
+
+From Agreed-order history, by agreed quantity: pushed out % = pushed-out agreed qty ÷ total agreed; cancelled % likewise; reduced % = Σ(agreed − actual) on reduced orders ÷ total agreed; taken as agreed % = accepted + pulled-in agreed qty ÷ total agreed.
+
+Score = 100 − (pushed out % × 0.6 + cancelled % × 1.0 + reduced % × 0.8). Excellent ≥ 95 (commit fully), Good ≥ 85 (commit, review monthly), Fair ≥ 70 (firm PO before building beyond the frozen months), Risk below (build to firm PO; NCNR terms or deposit).
+
+Open orders (Customer orders not cancelled, from the plan start) at risk = open units × (pushed out % + cancelled % + reduced %) ÷ 100; revenue at risk uses each customer's ASP.
+
+## 18. Post-silicon (test data) analysis
+
+- **Lot yield** = Σ passed ÷ Σ tested over the lot's wafers at the step.
+- **Control limits**: centre = median lot yield; σ = 1.4826 × median absolute deviation; limits = centre ± k·σ, k = SPC sigma (Plan settings). Robust statistics keep an excursion from widening its own limits.
+- **Failure signature**: for a lot below the LCL, the fail bin whose share of the lot's fails is furthest above its share across all lots. 15 points or more above normal = a single failure mode (hardware or assembly); otherwise the loss is spread across bins (a process or material shift).
+- **Tester outlier**: tester yield ≥ 1.5 points below the other testers at the same OSAT over 3 or more lots. Lots with a single-failure-mode signature are excluded from this comparison.
+- **Sustained shift**: mean of the last 5 lots at an OSAT more than 2 points below the plan yield.
+- **Use in plan**: adds a Yield override (product, OSAT, step, from the plan start month) at the last-5-lot mean. **Update bin splits** replaces the product's bin fractions with the actual pass-bin mix.
+- **Test-data API**: `POST /api/v1/test-results` with `Authorization: Bearer <token>` (shown on the page, an HMAC of the workspace id) and JSON `{"results": [...], "bins": [...]}` using the table column names. Rows replace existing rows with the same key; validation is the same as an upload; up to 5,000 rows per list.
+
+## 19. Inventory health
+
+- **FG-equivalent** of a lot = quantity × yields of the steps still to come (wafer stages: wafers × GDPW × every yield).
+- **Value** = FG-equivalent × standard cost of the completed steps (section 12); cost complete % = completed ÷ total standard cost.
+- **Days of supply**: walk the plan demand month by month (working days per month) until the stock is used up.
+- **Excess** = FG + WIP FG-equivalent − demand over (Excess threshold weeks + the product's total cycle time); valued at finished-goods standard cost first, then at the WIP average.
+- **Aging** from the YYWW date code (ISO week): 0–3, 3–6, 6–12, 12+ months, and obsolete risk above Obsolete age months.
+
+## 20. Data checks
+
+Errors and warnings that change or stop the plan: products without a flow or without qualified OSATs, test times without testers, bin fractions that do not add up to 1, unmapped WIP lots, missing prices, cross-flow rules over 100%, references to unknown products or vendors, test results that pass more than they test, closed issues without dates, NPI milestones past their readout without a status, and QBR weights that do not add up to 100.
 
 ---
 

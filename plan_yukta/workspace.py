@@ -261,7 +261,52 @@ TABLES = {
         'title': 'NPI qualification plan', 'group': 'Monitoring', 'key': ['SKU', 'Milestone'],
         'about': 'Reliability qualification milestones for new products, run one after another after the first lots finish.',
         'used_by': ['NPI'],
-        'columns': [C('SKU'), C('Milestone'), C('Order', 'int', lo=1), C('CycleDays', 'int', lo=0), C('ReadoutDays', 'int', lo=0)],
+        'columns': [C('SKU'), C('Milestone'), C('Order', 'int', lo=1), C('CycleDays', 'int', lo=0), C('ReadoutDays', 'int', lo=0),
+                    C('Status', 'choice', choices=['Planned', 'Running', 'Passed', 'Failed'], required=False,
+                      help='Blank = Planned. A Failed milestone flags the product at risk.'),
+                    C('ActualEnd', 'date', 'Actual readout date once done; later milestones re-plan from it.', required=False)],
+    },
+    'vendor_issues': {
+        'title': 'Vendor issues log', 'group': 'Vendors & customers', 'key': ['IssueID'],
+        'about': 'Supplier issues for QBR follow-up (8D style): what happened, severity, owner, due date, root cause, corrective action and status.',
+        'used_by': ['Vendor QBR'],
+        'columns': [C('IssueID'), C('Vendor', help='OSAT code (A, B, C) or FAB.'), C('Opened', 'date'),
+                    C('Category', 'choice', choices=['Quality', 'Delivery', 'Capacity', 'Cost', 'Communication']),
+                    C('Severity', 'choice', choices=['Critical', 'Major', 'Minor']), C('Title'),
+                    C('SKU', required=False), C('Owner', required=False), C('Due', 'date', required=False),
+                    C('Status', 'choice', choices=['Open', 'In progress', 'Closed']), C('Closed', 'date', required=False),
+                    C('RootCause', required=False), C('Action', required=False)],
+    },
+    'qbr_weights': {
+        'title': 'QBR scorecard weights', 'group': 'Vendors & customers', 'key': ['Category'],
+        'about': 'How much each category counts in the vendor score, and the target that earns full marks.',
+        'used_by': ['Vendor QBR'],
+        'columns': [C('Category', 'choice', choices=['Quality', 'Delivery', 'Cost', 'Capacity', 'Responsiveness']),
+                    C('WeightPct', 'num', lo=0, hi=100), C('Target', 'num', 'Score 100 at or above this (see notes).', lo=0, hi=1000),
+                    C('Notes', required=False)],
+    },
+    'order_history': {
+        'title': 'Agreed-order history', 'group': 'Vendors & customers', 'key': ['OrderID'],
+        'about': 'Orders agreed with customers in the past and what the customer then did: took them as agreed, pushed out, pulled in, reduced or cancelled. Drives the customer rating.',
+        'used_by': ['Customer Rating'],
+        'columns': [C('OrderID'), C('Customer'), C('SKU'), C('AgreedMonth', 'month'), C('AgreedQty', 'int', lo=0),
+                    C('Outcome', 'choice', choices=['Accepted', 'Pushed out', 'Pulled in', 'Reduced', 'Cancelled']),
+                    C('ActualMonth', 'month', required=False), C('ActualQty', 'int', lo=0, required=False), C('Reason', required=False)],
+    },
+    'test_results': {
+        'title': 'Test results (lot / wafer)', 'group': 'Test data', 'key': ['Step', 'LotID', 'WaferID'],
+        'about': 'Units tested and passed per lot (or wafer) and test step, from the OSATs or your yield analytics tool. Feed it by file or by the test-data API.',
+        'used_by': ['Post-Silicon Analysis'],
+        'columns': [C('TestDate', 'date'), C('Vendor'), C('SKU'), C('Step', 'choice', choices=['Sort', 'Test1', 'Test2']), C('LotID'),
+                    C('WaferID', help='Wafer number, or - for a lot-level row.'), C('TesterID', required=False),
+                    C('Tested', 'int', lo=0), C('Passed', 'int', lo=0)],
+    },
+    'test_bins': {
+        'title': 'Test bin counts', 'group': 'Test data', 'key': ['Step', 'LotID', 'Bin'],
+        'about': 'Units per bin for each lot and step. Pass bins are sellable grades; fail bins are rejects by failure mode.',
+        'used_by': ['Post-Silicon Analysis'],
+        'columns': [C('Step', 'choice', choices=['Sort', 'Test1', 'Test2']), C('LotID'), C('Bin'), C('Count', 'int', lo=0),
+                    C('Pass', 'choice', choices=YN), C('Description', required=False)],
     },
     'plan_snapshot': {
         'title': 'Frozen plan (past months)', 'group': 'Monitoring', 'key': ['Month', 'Vendor', 'SKU', 'Operation'],
@@ -282,7 +327,7 @@ TABLES = {
     },
 }
 
-GROUPS = ['Master data', 'Demand', 'Capacity', 'Inventory', 'Procurement', 'Monitoring']
+GROUPS = ['Master data', 'Demand', 'Capacity', 'Inventory', 'Procurement', 'Monitoring', 'Vendors & customers', 'Test data']
 
 # Settings: name -> (type, default, notes, lo, hi)
 SETTINGS = {
@@ -312,6 +357,9 @@ SETTINGS = {
     'Tester running cost USD per month': ('num', 4000, 'ATE Economics: support, calibration and floor cost per tester.', 0, 1e8),
     'Discount rate %': ('num', 8, 'ATE Economics: annual rate for NPV.', 0, 50),
     'Analysis months': ('int', 60, 'ATE Economics: payback analysis period.', 6, 120),
+    'Excess threshold weeks': ('num', 13, 'Inventory Health: stock above this many weeks of demand is excess.', 1, 104),
+    'Obsolete age months': ('int', 18, 'Inventory Health: date codes older than this are obsolete risk.', 1, 120),
+    'SPC sigma': ('num', 3, 'Post-Silicon: control limits at mean ± this many standard deviations.', 1, 6),
     'Capacity buffer %': ('num', 15, 'Tester Capacity: headroom you want above the plan.', 0, 100),
 }
 

@@ -203,3 +203,99 @@ def plan_workbook(R) -> bytes:
                 wsx.column_dimensions[colc[0].column_letter].width = min(max(9, width + 2), 50)
             wsx.freeze_panes = 'A2'
     return buf.getvalue()
+
+
+def qbr_workbook(R, vendor, period='L3') -> bytes:
+    """QBR pack for one OSAT: scorecard (weighted total as a live formula), measures, agenda and issues."""
+    from . import insights as I
+    p = R['plan']
+    Q = I.qbr_view(p, R, period)
+    d = next(x for x in Q['scores'] if x['vendor'] == vendor)
+    wb = Workbook()
+    ws = wb.active
+    ws.title = 'Scorecard'
+    hdr = lambda c: (setattr(c, 'font', f(bold=True, color='FFFFFF')), setattr(c, 'fill', HEAD))
+    ws['A1'] = f'Quarterly business review: OSAT-{vendor}'
+    ws['A1'].font = f(bold=True, size=14)
+    per = f'{Q["months"][0]} to {Q["months"][-1]}' if Q['months'] else 'no actuals'
+    ws['A2'] = f'Period {per} · rank {d["rank"]} of {len(Q["scores"])} · as of {p.as_of:%d %b %Y}. Synthetic demo data.'
+    ws['A2'].font = f(italic=True)
+    ws['A3'] = 'Blue cells are inputs (weights, targets, category scores from Plan Yukta). The total and grade recalculate if you change them.'
+    ws['A3'].font = f(size=9, color='595959')
+    heads = ['Category', 'Measure', 'Target', 'Weight %', 'Score (0-100)', 'Weighted']
+    for j, h in enumerate(heads, start=1):
+        hdr(ws.cell(row=5, column=j, value=h))
+    blue = f(color='0000FF')
+    unit = {'Quality': '% of plan / reported', 'Delivery': '% of frozen plan', 'Cost': 'price index', 'Capacity': '% load on time',
+            'Responsiveness': 'avg days to close'}
+    for i, c in enumerate(I.CATS):
+        r = 6 + i
+        w, tgt = Q['weights'][c]
+        val = d['values'][c]
+        ws.cell(row=r, column=1, value=c).font = f()
+        m = ws.cell(row=r, column=2, value=round(val, 2) if val is not None else None)
+        m.font = f()
+        m.number_format = '0.0'
+        ws.cell(row=r, column=3, value=tgt).font = blue
+        ws.cell(row=r, column=4, value=w).font = blue
+        sc = ws.cell(row=r, column=5, value=round(d['scores'][c], 2) if d['scores'][c] is not None else None)
+        sc.font = blue
+        sc.number_format = '0.0'
+        wc = ws.cell(row=r, column=6, value=f'=IF(E{r}="",0,E{r}*D{r})')
+        wc.font = f()
+        wc.number_format = '0.0'
+        ws.cell(row=r, column=7, value=unit[c]).font = f(size=9, color='595959')
+    last = 6 + len(I.CATS) - 1
+    tr = last + 1
+    ws.cell(row=tr, column=1, value='Total').font = f(bold=True)
+    t = ws.cell(row=tr, column=5, value=f'=IFERROR(SUM(F6:F{last})/SUMPRODUCT((E6:E{last}<>"")*D6:D{last}),0)')
+    t.font = f(bold=True)
+    t.number_format = '0.0'
+    ws.cell(row=tr + 1, column=1, value='Grade').font = f(bold=True)
+    ws.cell(row=tr + 1, column=5, value=f'=IF(E{tr}>=90,"A",IF(E{tr}>=80,"B",IF(E{tr}>=70,"C","D")))').font = f(bold=True)
+    ws.cell(row=tr + 3, column=1, value='Scoring: 100 at or above target, minus 5 points per % below. Responsiveness: minus 3 points per day over target, '
+                                         '10 per overdue issue and 15 per open critical issue.').font = f(size=9, color='595959')
+    for col_, w in zip('ABCDEFG', (18, 14, 10, 10, 14, 11, 22)):
+        ws.column_dimensions[col_].width = w
+
+    ag = wb.create_sheet('Agenda')
+    for j, h in enumerate(['Category', 'Score', 'Why', 'Ask the vendor'], start=1):
+        hdr(ag.cell(row=1, column=j, value=h))
+    acts = [a for a in Q['actions'] if a['vendor'] == vendor]
+    for i, a in enumerate(acts, start=2):
+        for j, v in enumerate([a['category'], round(a['score'], 1), a['why'], a['action']], start=1):
+            ag.cell(row=i, column=j, value=v).font = f()
+    if not acts:
+        ag.cell(row=2, column=1, value='Every category is at 90 or above.').font = f(italic=True)
+    for col_, w in zip('ABCD', (16, 8, 40, 80)):
+        ag.column_dimensions[col_].width = w
+
+    tr_ = wb.create_sheet('Trend')
+    for j, h in enumerate(['Month', 'Score'], start=1):
+        hdr(tr_.cell(row=1, column=j, value=h))
+    for i, (m, v) in enumerate(zip(Q['trend_months'], Q['trend'].get(vendor, [])), start=2):
+        tr_.cell(row=i, column=1, value=m).font = f()
+        c = tr_.cell(row=i, column=2, value=round(v, 1))
+        c.font = f()
+
+    iss = wb.create_sheet('Issues')
+    cols = ['IssueID', 'Opened', 'Category', 'Severity', 'Title', 'SKU', 'Owner', 'Due', 'Status', 'Closed', 'days_to_close', 'RootCause', 'Action']
+    heads = ['Issue', 'Opened', 'Category', 'Severity', 'Issue', 'Product', 'Owner', 'Due', 'Status', 'Closed', 'Days to close', 'Root cause', 'Action']
+    for j, h in enumerate(heads, start=1):
+        hdr(iss.cell(row=1, column=j, value=h))
+    rows = [i for i in Q['issues'] if i['Vendor'] == vendor]
+    red = PatternFill('solid', fgColor='FDE2E1')
+    for i, r in enumerate(rows, start=2):
+        for j, k in enumerate(cols, start=1):
+            v = r.get(k)
+            c = iss.cell(row=i, column=j, value=str(v) if k in ('Opened', 'Due', 'Closed') and v else v)
+            c.font = f()
+            c.alignment = Alignment(wrap_text=k in ('Title', 'RootCause', 'Action'), vertical='top')
+            if r['overdue']:
+                c.fill = red
+    for col_, w in zip('ABCDEFGHIJKLM', (10, 11, 13, 9, 44, 9, 16, 11, 11, 11, 9, 30, 40)):
+        iss.column_dimensions[col_].width = w
+    iss.freeze_panes = 'A2'
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()

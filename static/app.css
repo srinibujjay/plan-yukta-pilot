@@ -360,3 +360,14 @@ details > summary { cursor: pointer; color: var(--accent2); font-size: 13px; mar
 .chart .dn-l { fill: var(--ink2); font: 13px "Inter", sans-serif; } .chart .dn-n { fill: var(--muted); font: 12.5px "JetBrains Mono", monospace; }
 .insights { margin: 0; padding-left: 18px; } .insights li { margin-bottom: 7px; color: var(--ink2); } .insights b { color: var(--ink); }
 .nav-item.sub { padding-left: 34px; font-size: 12.6px; } .nav-item.sub svg { width: 15px; height: 15px; flex-basis: 15px; }
+
+/* vendors, customers, post-silicon */
+td.nw, .sortable-table td:first-child { white-space: nowrap; }
+pre.code { background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; font: 12px/1.5 "JetBrains Mono", monospace;
+  overflow-x: auto; max-width: 100%; white-space: pre; margin: 0 0 10px; }
+.closeform { display: flex; gap: 6px; align-items: center; }
+.closeform input { width: 140px; padding: 4px 7px; font-size: 12px; }
+.actrow { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; padding: 9px 0; border-top: 1px solid var(--line); }
+.actrow:first-of-type { border-top: 0; }
+.addform > summary { list-style: none; cursor: pointer; display: inline-flex; }
+.addform > summary::-webkit-details-marker { display: none; }

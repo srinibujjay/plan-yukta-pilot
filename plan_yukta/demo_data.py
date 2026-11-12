@@ -278,6 +278,10 @@ def build() -> dict:
     # one lot booked under a product code nobody mapped, to show the data check
     lots.append(dict(Vendor='B', LotID=f'PYB{seq["B"]:04d}', VendorProduct='OR9000B-ENG', VendorOperation='Final Test 1',
                      State='WAIT', Wafers=None, Units=24000, Bin=None, HoldReason=None, DateCode='2644'))
+    # aged ATLAS finished goods from a cancelled program (date code early 2025): excess and obsolete-risk story
+    for j, (q, dc) in enumerate([(240000, '2507'), (180000, '2511'), (150000, '2602')]):
+        lots.append(dict(Vendor='B', LotID=f'PYB{seq["B"] + 1 + j:04d}', VendorProduct='AT9000B', VendorOperation='Finished Goods',
+                         State='DONE', Wafers=None, Units=q, Bin='BIN_1', HoldReason=None, DateCode=dc))
     t['osat_wip'] = lots
 
     fab = []
@@ -365,7 +369,140 @@ def build() -> dict:
                                     Disruption=ev[0] if ev else 'None'))
     t['plan_snapshot'] = snap
     t['actuals'] = act
+    t['vendor_issues'] = _issues()
+    t['qbr_weights'] = [
+        dict(Category='Quality', WeightPct=30, Target=99.5, Notes='Average of test yield vs plan and reported quality %. 99.5 or better = full marks.'),
+        dict(Category='Delivery', WeightPct=30, Target=98, Notes='Output attainment vs the frozen plan, %.'),
+        dict(Category='Cost', WeightPct=15, Target=100, Notes='Price index: 100 = lowest price among OSATs for the same work.'),
+        dict(Category='Capacity', WeightPct=15, Target=99.9, Notes='Share of the forward test load the OSAT can make on time, %.'),
+        dict(Category='Responsiveness', WeightPct=10, Target=14, Notes='Average days to close an issue; at or under target = full marks. Overdue and open critical issues cost points.'),
+    ]
+    t['order_history'] = _order_history()
+    t['test_results'], t['test_bins'] = _test_data()
     return t
+
+
+def _issues():
+    rows = [
+        ('VI-0101', 'A', '2026-08-06', 'Quality', 'Critical', 'ORION final test 1 yield excursion: contact resistance', 'ORION', 'OSAT-A quality', '2026-08-20', 'Closed', '2026-08-18',
+         'Worn pogo pins on two handlers', 'Pin replacement on all T-700 handlers; contact check added to daily PM'),
+        ('VI-0102', 'B', '2026-09-09', 'Delivery', 'Major', 'Final test 1 tester down 3 days (power supply)', 'ORION', 'OSAT-B ops', '2026-09-16', 'Closed', '2026-09-14',
+         'Instrument power supply failure', 'Spare supply stocked on site'),
+        ('VI-0103', 'C', '2026-10-05', 'Delivery', 'Major', 'LYRA assembly stopped: substrate shortage', 'LYRA', 'Supply planning', '2026-10-20', 'Closed', '2026-10-24',
+         'Late substrate delivery from supplier S2', 'Two-week buffer stock agreed'),
+        ('VI-0104', 'C', '2026-10-21', 'Quality', 'Major', 'LYRA substrate warpage: lots on hold', 'LYRA', 'OSAT-C quality', '2026-11-04', 'Open', None,
+         'Under investigation', 'Supplier deviation request raised'),
+        ('VI-0105', 'C', '2026-09-30', 'Communication', 'Minor', 'Daily WIP report arriving after 10:00', None, 'OSAT-C planner', '2026-10-15', 'Open', None, None,
+         'Automate the report export'),
+        ('VI-0106', 'B', '2026-10-28', 'Quality', 'Major', 'ORION lot on hold after final test 1 yield drop', 'ORION', 'OSAT-B quality', '2026-11-11', 'In progress', None,
+         'Suspected probe-card wear at sort', 'Engineering review of sort data'),
+        ('VI-0107', 'A', '2026-10-12', 'Cost', 'Minor', 'Assembly price increase request (+4%)', None, 'Procurement', '2026-11-30', 'Open', None, None,
+         'Negotiate against volume ramp'),
+        ('VI-0108', 'FAB', '2026-08-25', 'Delivery', 'Major', 'Wafer outs one week late on two VEGA lots', 'VEGA', 'Foundry manager', '2026-09-05', 'Closed', '2026-09-03',
+         'Litho tool down at the foundry', 'Foundry moved lots to a backup tool'),
+        ('VI-0109', 'A', '2026-07-14', 'Delivery', 'Minor', 'Packing labels wrong on one shipment', 'VEGA', 'OSAT-A logistics', '2026-07-21', 'Closed', '2026-07-17',
+         'Template not updated', 'Label template locked in MES'),
+        ('VI-0110', 'B', '2026-07-22', 'Capacity', 'Minor', 'Second final-test shift not staffed in August', None, 'OSAT-B ops', '2026-08-01', 'Closed', '2026-08-05',
+         'Hiring delay', 'Temporary staff from another line'),
+        ('VI-0111', 'A', '2026-11-02', 'Capacity', 'Major', 'Instrument cards for the 6th tester not yet delivered', 'ORION', 'Test engineering', '2026-12-15', 'Open', None, None,
+         'Cards on PO, due February; plan uses non-consignee time'),
+        ('VI-0112', 'C', '2026-08-18', 'Quality', 'Minor', 'Marking smudge on LYRA trays', 'LYRA', 'OSAT-C quality', '2026-08-30', 'Closed', '2026-09-12',
+         'Ink viscosity', 'Ink change and inspection step'),
+    ]
+    keys = ['IssueID', 'Vendor', 'Opened', 'Category', 'Severity', 'Title', 'SKU', 'Owner', 'Due', 'Status', 'Closed', 'RootCause', 'Action']
+    return [dict(zip(keys, r)) for r in rows]
+
+
+def _order_history():
+    months = ['2026-05', '2026-06', '2026-07', '2026-08', '2026-09', '2026-10']
+    plan = {   # customer: list of (sku, qty k) per month, and the behaviour pattern by month index
+        'Customer Alpha': ([('ORION', 1100), ('VEGA', 900)], {}),
+        'Customer Beta': ([('ORION', 700), ('LYRA', 40)], {1: ('Pushed out', 1, None, 'End-customer launch slipped'),
+                                                           3: ('Pushed out', 1, None, 'Inventory correction'),
+                                                           4: ('Reduced', 0, .7, 'Lower sell-through')}),
+        'Customer Gamma': ([('LYRA', 110), ('ATLAS', 200)], {2: ('Cancelled', 0, 0, 'Platform end of life'),
+                                                             4: ('Reduced', 0, .6, 'EOL last-time-buy smaller than agreed'),
+                                                             5: ('Pushed out', 1, None, 'Line move at their factory')}),
+        'Customer Delta': ([('VEGA', 450), ('ORION', 50)], {0: ('Pulled in', -1, None, 'Asked for earlier delivery'),
+                                                            3: ('Pulled in', -1, None, 'Promotion build'),
+                                                            5: ('Reduced', 0, .6, 'Promotion ended early')}),
+    }
+    rows, n = [], 1
+    for cust, (items, pattern) in plan.items():
+        for mi, m in enumerate(months):
+            for si, (sku, q) in enumerate(items):
+                qty = int(q * 1000 * (1 + 0.03 * ((mi + si) % 3)))
+                out, shift, frac, why = ('Accepted', 0, None, None)
+                if mi in pattern:
+                    out, shift, frac, why = pattern[mi]
+                y, mm = int(m[:4]), int(m[5:])
+                t = y * 12 + mm - 1 + shift
+                actual_m = f'{t // 12}-{t % 12 + 1:02d}' if out != 'Cancelled' else None
+                aq = 0 if out == 'Cancelled' else (int(qty * frac) if frac else qty)
+                rows.append(dict(OrderID=f'AO-{25000 + n}', Customer=cust, SKU=sku, AgreedMonth=m, AgreedQty=qty, Outcome=out,
+                                 ActualMonth=actual_m, ActualQty=aq, Reason=why))
+                n += 1
+    return rows
+
+
+def _test_data():
+    """Lot-level test results Jun-Oct 2026 for the OSATs' sort and final test, with two real stories:
+    an ORION Test1 yield excursion at OSAT-A in August (contact failures) and a weak tester at OSAT-B."""
+    import random
+    rnd = random.Random(42)
+    testers = {'A': [f'T7-A0{i}' for i in range(1, 9)], 'B': [f'T7-B0{i}' for i in range(1, 8)], 'C': [f'T5-C0{i}' for i in range(1, 5)]}
+    fail_bins = [('HB5', 'Continuity / open-short'), ('HB6', 'Leakage'), ('HB7', 'Functional'), ('HB8', 'Parametric Idd / Vdd'), ('HB9', 'Retest limit')]
+    base_mix = [0.22, 0.18, 0.30, 0.22, 0.08]
+    results, bins = [], []
+    lot_no = 1
+    days = [f'2026-{m:02d}-{d:02d}' for m in (6, 7, 8, 9, 10) for d in (3, 10, 17, 24)]
+    for sku, vends in QUALIFIED.items():
+        if sku == 'NOVA':
+            continue
+        flow = {op: (y, rw) for op, y, rw, ct in FLOWS[sku]}
+        for v in vends:
+            for di, day in enumerate(days):
+                if sku == 'ATLAS' and di % 2:
+                    continue
+                lot = f'PYT{lot_no:05d}'
+                lot_no += 1
+                for step in ('Sort', 'Test1', 'Test2'):
+                    if step not in flow:
+                        continue
+                    y = flow[step][0]
+                    if sku == 'LYRA' and v == 'C' and step == 'Test1' and day >= '2026-10-01':
+                        y = 0.84
+                    excursion = sku == 'ORION' and v == 'A' and step == 'Test1' and '2026-08-03' <= day <= '2026-08-17'
+                    if excursion:
+                        y = 0.855
+                    tester = testers[v][di % len(testers[v])]
+                    if v == 'B' and tester == 'T7-B05' and step != 'Sort':
+                        y -= 0.025
+                    y = max(0.5, min(0.995, y + rnd.gauss(0, 0.008 if step != 'Sort' else 0.012)))
+                    if step == 'Sort':
+                        tested = 25 * FORECAST_GDPW[sku]
+                    else:
+                        tested = int(rnd.choice([80000, 90000, 100000]) if sku != 'LYRA' else rnd.choice([20000, 24000]))
+                    passed = int(round(tested * y))
+                    results.append(dict(TestDate=day, Vendor=v, SKU=sku, Step=step, LotID=lot, WaferID='-',
+                                        TesterID=tester if step != 'Sort' else f'PR-{v}0{1 + di % 2}', Tested=tested, Passed=passed))
+                    if step == 'Test1':
+                        fr = BINS[sku]
+                        left = passed
+                        for bi, f in enumerate(fr):
+                            c = left if bi == len(fr) - 1 else int(round(passed * f))
+                            left -= c
+                            bins.append(dict(Step=step, LotID=lot, Bin=f'BIN_{bi + 1}', Count=c, Pass='Y', Description=f'Grade {bi + 1}'))
+                        fails = tested - passed
+                        mix = list(base_mix)
+                        if excursion:
+                            mix = [0.62, 0.10, 0.14, 0.10, 0.04]
+                        left = fails
+                        for k, ((b, desc), f) in enumerate(zip(fail_bins, mix)):
+                            c = left if k == len(mix) - 1 else int(round(fails * f))
+                            left -= c
+                            bins.append(dict(Step=step, LotID=lot, Bin=b, Count=max(0, c), Pass='N', Description=desc))
+    return results, bins
 
 
 FORECAST_GDPW = {'ORION': 9000, 'VEGA': 24000, 'LYRA': 7400, 'ATLAS': 9000, 'NOVA': 9400}

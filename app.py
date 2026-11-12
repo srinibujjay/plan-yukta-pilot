@@ -57,7 +57,7 @@ def _testers() -> dict:
 
 @app.before_request
 def _require_access():
-    if not _testers() or request.endpoint in ('login', 'static', 'healthz'):
+    if not _testers() or request.endpoint in ('login', 'static', 'healthz', 'api_test_results'):
         return None
     if session.get('tester') not in _testers():
         session.clear()
@@ -217,6 +217,7 @@ BUILDERS = {
     'ate': views.ate, 'npi': views.npi, 'fab-po': views.fab_po, 'osat-po': views.osat_po, 'substrate': views.substrate,
     'cross-flow': views.cross_flow, 'b2b': views.b2b, 'pva': views.pva, 'cost': views.cost, 'pnl': views.pnl,
     'm1-dashboard': views.m1_dashboard, 'flow-dashboard': views.flow_dashboard,
+    'vendor-qbr': views.vendor_qbr, 'customers': views.customers, 'inventory': views.inventory,
 }
 
 
@@ -233,6 +234,8 @@ def module_page(key):
     R = results(wsid, ws)
     if key in BUILDERS:
         return render_page(key, BUILDERS[key](R, request.args), R, ws)
+    if key == 'postsilicon':
+        return render_page(key, views.postsilicon(R, request.args, token=api_token(wsid), base_url=request.host_url), R, ws)
     if key == 'overrides':
         Rb = baseline_results(wsid, ws)
         return render_page(key, views.overrides(R, Rb, request.args, ws), R, ws)
@@ -760,6 +763,158 @@ def override_switch():
     return redirect(url_for('module_page', key='overrides', msg='Setting changed; every module has been re-planned.'))
 
 
+# ------------------------------------------------------------------ vendor QBR, post-silicon
+def _redirect_back(key, anchor='', **kw):
+    return redirect(url_for('module_page', key=key, **kw) + anchor)
+
+
+@app.post('/qbr/issue/add')
+def qbr_issue_add():
+    wsid, ws = ws_get()
+    rows = list(ws['tables'].get('vendor_issues', []))
+    nums = [int(r['IssueID'][3:]) for r in rows if str(r.get('IssueID', '')).startswith('VI-') and r['IssueID'][3:].isdigit()]
+    f = request.form
+    row = {'IssueID': f'VI-{(max(nums) + 1) if nums else 1:04d}', 'Vendor': (f.get('Vendor') or '').strip(), 'Opened': f.get('Opened') or None,
+           'Category': f.get('Category'), 'Severity': f.get('Severity'), 'Title': (f.get('Title') or '').strip()[:160],
+           'SKU': (f.get('SKU') or '').strip() or None, 'Owner': (f.get('Owner') or '').strip()[:60] or None, 'Due': f.get('Due') or None,
+           'Status': 'Open', 'Closed': None, 'RootCause': None, 'Action': (f.get('Action') or '').strip()[:200] or None}
+    clean, errors = W.validate_rows('vendor_issues', rows + [row])
+    if errors:
+        i, c, m = errors[0]
+        return _redirect_back('vendor-qbr', '#issues', err=f'{c}: {m}. The issue was not added.')
+    ws['tables']['vendor_issues'] = clean
+    _mark_edited(ws, 'vendor_issues')
+    W.save(wsid, ws)
+    return _redirect_back('vendor-qbr', '#issues', msg=f'Issue {row["IssueID"]} logged; the scorecard has been updated.')
+
+
+@app.post('/qbr/issue/close')
+def qbr_issue_close():
+    wsid, ws = ws_get()
+    rows = ws['tables'].get('vendor_issues', [])
+    iid = request.form.get('id')
+    hit = next((r for r in rows if r['IssueID'] == iid), None)
+    if not hit:
+        return _redirect_back('vendor-qbr', '#issues', err='That issue is no longer in the log.')
+    as_of = W.settings_dict(ws).get('As-of date')
+    hit.update(Status='Closed', Closed=str(as_of)[:10] if as_of else datetime.utcnow().strftime('%Y-%m-%d'))
+    if (request.form.get('root') or '').strip():
+        hit['RootCause'] = request.form['root'].strip()[:160]
+    clean, errors = W.validate_rows('vendor_issues', rows)
+    if errors:
+        return _redirect_back('vendor-qbr', '#issues', err=f'{errors[0][1]}: {errors[0][2]}.')
+    ws['tables']['vendor_issues'] = clean
+    _mark_edited(ws, 'vendor_issues')
+    W.save(wsid, ws)
+    return _redirect_back('vendor-qbr', '#issues', msg=f'{iid} closed on the as-of date.')
+
+
+@app.post('/postsilicon/use-yield')
+def postsilicon_use_yield():
+    wsid, ws = ws_get()
+    R = results(wsid, ws)
+    f = request.form
+    sku, vendor, step = f.get('sku'), f.get('vendor'), f.get('step')
+    try:
+        y = round(float(f.get('yield')), 4)
+    except (TypeError, ValueError):
+        abort(400)
+    start = R['plan'].start
+    rows = [r for r in ws['tables'].get('yield_overrides', [])
+            if not (r['SKU'] == sku and r['Vendor'] == vendor and r['Operation'] == step and r['EffectiveMonth'] == start)]
+    row = {'SKU': sku, 'Vendor': vendor, 'Operation': step, 'EffectiveMonth': start, 'Yield': y, 'ReworkRate': None,
+           'Reason': 'Post-Silicon: last-5-lot mean'}
+    cols = [c['name'] for c in W.TABLES['yield_overrides']['columns']]
+    row = {k: row.get(k) for k in cols}
+    clean, errors = W.validate_rows('yield_overrides', rows + [row])
+    if errors:
+        return _redirect_back('postsilicon', err=f'{errors[0][1]}: {errors[0][2]}.', sku=sku, step=step)
+    ws['tables']['yield_overrides'] = clean
+    _mark_edited(ws, 'yield_overrides')
+    W.save(wsid, ws)
+    return _redirect_back('postsilicon', sku=sku, step=step,
+                          msg=f'{sku} {step} at OSAT-{vendor} now plans at {y * 100:.1f}% from {views.mlabel(start)} (Yield override added). '
+                              f'Starts, tester load and wafer starts have been re-planned.')
+
+
+@app.post('/postsilicon/use-bins')
+def postsilicon_use_bins():
+    from plan_yukta import insights
+    wsid, ws = ws_get()
+    R = results(wsid, ws)
+    sku, step = request.form.get('sku'), request.form.get('step') or 'Test1'
+    P = insights.postsilicon_view(R['plan'], sku, step)
+    act = [(b['bin'], b['actual']) for b in P['bin_split'] if b['actual']]
+    tot = sum(a for _, a in act)
+    if P['sku'] != sku or not tot:
+        return _redirect_back('postsilicon', err='No pass-bin data for that product.', sku=sku, step=step)
+    fr = [(b, round(a / tot, 4)) for b, a in act]
+    fr[-1] = (fr[-1][0], round(1 - sum(x for _, x in fr[:-1]), 4))
+    rows = [r for r in ws['tables']['bin_splits'] if r['SKU'] != sku] + [{'SKU': sku, 'Bin': b, 'Fraction': x} for b, x in fr]
+    clean, errors = W.validate_rows('bin_splits', rows)
+    if errors:
+        return _redirect_back('postsilicon', err=f'{errors[0][1]}: {errors[0][2]}.', sku=sku, step=step)
+    ws['tables']['bin_splits'] = clean
+    _mark_edited(ws, 'bin_splits')
+    W.save(wsid, ws)
+    return _redirect_back('postsilicon', sku=sku, step=step, msg=f'{sku} bin splits updated from actual test bins: ' +
+                          ', '.join(f'{b} {x * 100:.1f}%' for b, x in fr) + '.')
+
+
+def api_token(wsid):
+    return f'{wsid}.' + hmac.new(app.config['SECRET_KEY'].encode(), f'test-data:{wsid}'.encode(), 'sha256').hexdigest()[:32]
+
+
+def _token_ws():
+    auth = request.headers.get('Authorization', '')
+    tok = auth[7:].strip() if auth.lower().startswith('bearer ') else ''
+    wsid, _, sig = tok.partition('.')
+    if not wsid or not sig or not hmac.compare_digest(api_token(wsid), tok):
+        return None, None
+    ws = W.load(wsid)
+    return (wsid, ws) if ws else (None, None)
+
+
+API_MAX_ROWS = 5000
+
+
+@app.route('/api/v1/test-results', methods=['GET', 'POST'])
+def api_test_results():
+    wsid, ws = _token_ws()
+    if not ws:
+        return jsonify({'error': 'Missing or invalid token. Copy it from Post-Silicon Analysis.'}), 401
+    if request.method == 'GET':
+        return jsonify({'test_results': len(ws['tables'].get('test_results', [])), 'test_bins': len(ws['tables'].get('test_bins', []))})
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict):
+        return jsonify({'error': 'Send a JSON object: {"results": [...], "bins": [...]}'}), 400
+    out = {'results_added': 0, 'bins_added': 0, 'errors': []}
+    for name, table in (('results', 'test_results'), ('bins', 'test_bins')):
+        new = body.get(name) or []
+        if not isinstance(new, list) or len(new) > API_MAX_ROWS or not all(isinstance(r, dict) for r in new):
+            return jsonify({'error': f'"{name}" must be a list of up to {API_MAX_ROWS} objects.'}), 400
+        if not new:
+            continue
+        cols = [c['name'] for c in W.TABLES[table]['columns']]
+        new = [{c: r.get(c) for c in cols} for r in new]
+        key = W.TABLES[table]['key']
+        sig = lambda r: tuple(str(r.get(k)).upper() for k in key)
+        incoming = {sig(r) for r in new}
+        rows = [r for r in ws['tables'].get(table, []) if sig(r) not in incoming] + new
+        clean, errors = W.validate_rows(table, rows)
+        if errors:
+            off = len(rows) - len(new)
+            out['errors'] += [{'list': name, 'row': i - off + 1, 'column': c, 'error': m} for i, c, m in errors[:20]]
+            continue
+        ws['tables'][table] = clean
+        _mark_edited(ws, table)
+        out[f'{name}_added'] = len(new)
+    if out['results_added'] or out['bins_added']:
+        W.save(wsid, ws)
+    app.logger.info('PILOT test-data API results=%s bins=%s errors=%s', out['results_added'], out['bins_added'], len(out['errors']))
+    return jsonify(out), (200 if not out['errors'] else 422)
+
+
 # ------------------------------------------------------------------ exports
 def _download(data, name, mime):
     return send_file(io.BytesIO(data), as_attachment=True, download_name=name, mimetype=mime)
@@ -772,6 +927,11 @@ XLSX = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
 def export(name):
     wsid, ws = ws_get()
     R = results(wsid, ws)
+    if name.startswith('qbr-') and name.endswith('.xlsx'):
+        v = name[4:-5]
+        if v not in R['plan'].vendors:
+            abort(404)
+        return _download(exports.qbr_workbook(R, v, request.args.get('period') or 'L3'), f'PlanYukta_QBR_OSAT-{v}.xlsx', XLSX)
     if name == 'b2b.xlsx':
         return _download(exports.b2b_workbook(R), f'PlanYukta_B2B_{R["plan"].start}.xlsx', XLSX)
     if name == 'plan.xlsx':

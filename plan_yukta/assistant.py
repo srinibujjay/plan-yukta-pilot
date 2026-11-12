@@ -57,6 +57,26 @@ FAQ = [
      '(100% of the cap), -0.05 moderate (63%, may use non-consignee testers), -0.02 conservative (40%), 0 neutral (25%, own testers '
      'only), positive = avoid. Pull-in Setup has sliders with a live preview of total gap, pull-in production, forecast '
      'achievement and build-ahead stock. The Module 1 Dashboard shows root cause and a monthly recovery plan.'),
+    ('Vendor QBR scorecard and issues log',
+     'Vendor QBR & Issues ranks each OSAT 0-100 on quality (test yield vs plan and reported quality), delivery (delivered vs '
+     'frozen plan), cost (price index against the lowest quote), capacity (forward test load made on time) and responsiveness '
+     '(days to close issues, minus points for overdue and open critical issues). Weights and targets are in QBR scorecard weights. '
+     'Grades A >= 90, B >= 80, C >= 70. The page writes a QBR agenda, keeps an 8D-style issues log you can add to and close, and '
+     'downloads a QBR pack per vendor.'),
+    ('Customer rating',
+     'Customer Rating scores how reliably each customer takes agreed orders: 100 - (pushed out % x 0.6 + cancelled % x 1.0 + '
+     'reduced % x 0.8), by agreed quantity, from Agreed-order history. Excellent >= 95, Good >= 85, Fair >= 70, else Risk, each '
+     'with a commit policy. Open orders are risk-adjusted by the same history.'),
+    ('Post-silicon analysis and the test-data API',
+     'Post-Silicon Analysis reads lot and wafer test results and bins: control chart (median +/- SPC sigma x robust sigma), lots '
+     'below the limit with their failure signature, tester outliers, sustained yield shifts, fail-bin Pareto and bin split vs plan. '
+     '"Use in the plan" adds a Yield override at the last-5-lot mean; "Update bin splits" copies the actual pass-bin mix. Results '
+     'can be pushed by POST /api/v1/test-results with the bearer token shown on the page, for example from an export job of a '
+     'commercial yield-analytics tool; it is a generic JSON endpoint, not a vendor connector.'),
+    ('Inventory health',
+     'Inventory Health values every WIP lot and finished goods at standard cost for the steps completed, converts WIP to the '
+     'finished units it should yield, shows days of supply against plan demand, excess above the threshold weeks plus cycle time, '
+     'and aging from the YYWW date code with obsolete risk. In the demo, end-of-life ATLAS has excess and obsolete-risk stock.'),
     ("Holt's method",
      "Holt is not a typo. Holt's linear trend method (Charles C. Holt, 1957) is a standard exponential smoothing forecast that "
      'tracks a level and a trend. Alpha weights the latest level and beta the latest trend. WMAPE and bias are measured on '
