@@ -1705,7 +1705,7 @@ def checks_view(p: Plan):
     pids = {r['ProjectID'] for r in t.get('pf_projects', [])}
     pools = {r['Pool'] for r in t.get('pf_pools', [])}
     for name, cols in (('pf_demand', ['ProjectID']), ('pf_gates', ['ProjectID']), ('pf_risks', ['ProjectID']),
-                       ('pf_decisions', ['ProjectID']), ('pf_dependencies', ['From', 'To'])):
+                       ('pf_decisions', ['ProjectID']), ('pf_requests', ['ProjectID']), ('pf_dependencies', ['From', 'To'])):
         bad = sorted({r[c] for r in t.get(name, []) for c in cols if r.get(c) and r[c] not in pids})
         if bad:
             out.append(('warning', name, f'{TABLES[name]["title"]} mentions projects not in Portfolio projects: {", ".join(bad[:6])}; those rows are ignored.'))

@@ -24,6 +24,11 @@ REASON_TYPE = {'Hiring plan': 'Permanent hire', 'Contractors': 'Contractor', 'Pa
                'Scenario': 'Contractor'}
 
 
+def _ml(m):
+    n = 'Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec'.split()
+    return f'{n[int(m[5:7]) - 1]} {m[:4]}' if m and len(str(m)) >= 7 else str(m)
+
+
 def mdiff(a, b):
     """Months from a to b (YYYY-MM)."""
     return (int(b[:4]) * 12 + int(b[5:7])) - (int(a[:4]) * 12 + int(a[5:7]))
@@ -200,11 +205,29 @@ class Portfolio:
             a, b = self._idx(d['From']), self._idx(d['To'])
             for i in range(max(0, a), min(H - 1, b) + 1):
                 self.pdem[d['ProjectID']][d['Pool']][i] += float(d['FTE'])
+        # resource requests: hard-booked = committed demand on top of the plan; soft-booked = tentative, tracked apart
+        self.soft = {p: [0.0] * H for p in self.supply}
+        self.req_rows = []
+        for r in self.t.get('pf_requests') or []:
+            if r['ProjectID'] not in self.projects or r['Pool'] not in self.supply:
+                continue
+            a, b = self._idx(r['From']), self._idx(r['To'])
+            vec = [float(r['FTE']) if a <= i <= b else 0.0 for i in range(H)]
+            if r['Status'] == 'Hard-booked':
+                for i, x in enumerate(vec):
+                    self.pdem[r['ProjectID']][r['Pool']][i] += x
+            elif r['Status'] == 'Soft-booked':
+                for i, x in enumerate(vec):
+                    self.soft[r['Pool']][i] += x
+            self.req_rows.append((r, vec))
         # project FTE totals (whole window, not just horizon) for investment views
         self.fte_months = defaultdict(float)
         for d in self.t['pf_demand']:
             if d['ProjectID'] in self.projects:
                 self.fte_months[d['ProjectID']] += float(d['FTE']) * (mdiff(d['From'], d['To']) + 1)
+        for r in self.t.get('pf_requests') or []:
+            if r['Status'] == 'Hard-booked' and r['ProjectID'] in self.projects and r['Pool'] in self.pools:
+                self.fte_months[r['ProjectID']] += float(r['FTE']) * (mdiff(r['From'], r['To']) + 1)
 
     def demand_of(self, pids):
         out = {p: [0.0] * self.H for p in self.supply}
@@ -260,7 +283,8 @@ class Portfolio:
             fm = self.fte_months.get(p['ProjectID'], 0.0)
             p['fte_years'] = fm / 12
             cost = sum(float(d['FTE']) * (mdiff(d['From'], d['To']) + 1) / 12 * float(self.pools[d['Pool']]['CostPerFTEk'])
-                       for d in self.t['pf_demand'] if d['ProjectID'] == p['ProjectID'] and d['Pool'] in self.pools) / 1000
+                       for d in self.t['pf_demand'] + [r for r in self.t.get('pf_requests') or [] if r['Status'] == 'Hard-booked']
+                       if d['ProjectID'] == p['ProjectID'] and d['Pool'] in self.pools) / 1000
             p['cost_usdm'] = cost
             p['value_per_cost'] = float(p['ValueUSDm']) / cost if cost else None
 
@@ -487,3 +511,154 @@ def silicon_links(pf: Portfolio, R):
                     'qual_done': qd, 'need_by': launch_need, 'late_months': late, 'first_demand': n.get('need_date') if n else None,
                     'failed': n.get('failed') if n else None})
     return out
+
+
+# ------------------------------------------------------------------ resource requests
+def evaluate_requests(pf):
+    """Recommendation for each open request: fits target capacity on committed work + other hard bookings?"""
+    out = []
+    order = {'Critical': 0, 'High': 1, 'Medium': 2, 'Low': 3}
+    for r, vec in pf.req_rows:
+        pool = r['Pool']
+        p = pf.projects[r['ProjectID']]
+        load = pf.load_committed[pool]
+        own = vec if r['Status'] == 'Hard-booked' else [0.0] * pf.H
+        worst, wm = 0.0, None
+        for i, x in enumerate(vec):
+            if not x:
+                continue
+            over = load[i] - own[i] + x - pf.supply[pool][i] * pf.target[pool]
+            if over > worst:
+                worst, wm = over, pf.months[i]
+        fits = worst <= 0.05
+        if r['Status'] in ('Hard-booked', 'Rejected', 'Withdrawn'):
+            rec, why = r['Status'], r.get('DecisionNote') or ''
+        elif p['Funding'] == 'Stopped':
+            rec, why = 'Reject', 'The project is stopped.'
+        elif fits and p['Funding'] == 'Committed':
+            rec, why = 'Hard-book', 'Fits target capacity and the project is committed.'
+        elif fits:
+            rec, why = 'Soft-book', 'Fits, but the project is not yet committed: hold the capacity until its gate.'
+        elif r['Priority'] in ('Critical', 'High') and p['Funding'] == 'Committed':
+            rec, why = 'Escalate', f'Over target by {worst:.1f} FTE in {_ml(wm)}: needs a trade-off at the Portfolio Board (contractors, re-phasing or a lower-priority project).'
+        else:
+            rec, why = 'Defer', f'Over target by {worst:.1f} FTE in {_ml(wm)} and not critical: resubmit for a later window.'
+        fte_m = sum(vec)
+        cost = fte_m / 12 * float(pf.pools[pool]['CostPerFTEk']) / 1000
+        out.append(dict(r, project=p['Name'], score=p['score'], funding=p.get('funding_result'), fits=fits, over=worst, over_month=wm,
+                        rec=rec, why=why, fte_months=fte_m, cost=cost, prio_rank=order.get(r['Priority'], 9)))
+    out.sort(key=lambda d: (d['Status'] in ('Hard-booked', 'Rejected', 'Withdrawn'), d['prio_rank'], -d['score']))
+    return out
+
+
+# ------------------------------------------------------------------ roadmap standards
+QUALITY_CHECKS = [
+    ('Owner named', 1), ('Value case complete', 2), ('Confidence stated', 1), ('All gates dated', 2), ('Next gate readiness scored', 1),
+    ('Resource demand entered', 2), ('Linked to delivery (Jira epic)', 1), ('Risks logged where confidence is low or risk high', 1),
+    ('No dependency conflict', 2), ('Forecast maintained (slip explained)', 1),
+]
+
+
+FAIL_TEXT = {'Owner named': 'no owner', 'Value case complete': 'value case incomplete', 'Confidence stated': 'no confidence level',
+             'All gates dated': 'gates not all dated', 'Next gate readiness scored': 'next gate readiness not scored',
+             'Resource demand entered': 'no resource demand', 'Linked to delivery (Jira epic)': 'no Jira epic',
+             'Risks logged where confidence is low or risk high': 'low confidence or high risk but no RAID entry',
+             'No dependency conflict': 'dependency conflict', 'Forecast maintained (slip explained)': 'slip not explained'}
+
+
+def roadmap_quality(pf):
+    risks = defaultdict(int)
+    for r in pf.t.get('pf_risks') or []:
+        if r['Status'] != 'Closed':
+            risks[r['ProjectID']] += 1
+    conflicts = {d['To'] for d in pf.deps if not d['ok']}
+    jira = {r['JiraKey'] for r in pf.t.get('pf_jira') or []}
+    rows = []
+    tw = sum(w for _, w in QUALITY_CHECKS)
+    for pid, p in pf.projects.items():
+        if p['Funding'] == 'Stopped':
+            continue
+        gl = pf.gates.get(pid, [])
+        ng = p.get('next_gate')
+        res = {
+            'Owner named': bool(p.get('Owner')),
+            'Value case complete': all(p.get(k) for k in ('ValueUSDm', 'StrategicFit', 'CustomerDemand', 'TimeCriticality', 'TechRisk')),
+            'Confidence stated': bool(p.get('Confidence')),
+            'All gates dated': p['Stage'] == 'Sustain' or (len({g['Gate'] for g in gl}) >= 6 and all(g['planned'] for g in gl)),
+            'Next gate readiness scored': p['Stage'] == 'Sustain' or (ng is not None and ng.get('Readiness') is not None),
+            'Resource demand entered': pid in pf.pdem and sum(sum(v) for v in pf.pdem[pid].values()) > 0 or pf.fte_months.get(pid, 0) > 0,
+            'Linked to delivery (Jira epic)': p['Stage'] in ('Idea', 'Concept') or bool(p.get('JiraKey') and p['JiraKey'] in jira),
+            'Risks logged where confidence is low or risk high': not (p['Confidence'] == 'Low' or int(p['TechRisk']) >= 4) or risks.get(pid, 0) > 0,
+            'No dependency conflict': pid not in conflicts,
+            'Forecast maintained (slip explained)': all((g['slip'] <= 0) or bool(g.get('Notes')) for g in gl),
+        }
+        score = sum(w for name, w in QUALITY_CHECKS if res[name]) / tw * 100
+        rows.append({'pid': pid, 'name': p['Name'], 'stage': p['Stage'], 'funding': p['Funding'], 'score': score,
+                     'status': 'Decision-ready' if score >= 90 else 'Needs work' if score >= 70 else 'Not ready',
+                     'missing': [FAIL_TEXT.get(n, n) for n, _ in QUALITY_CHECKS if not res[n]], 'checks': res})
+    rows.sort(key=lambda r: r['score'])
+    return rows
+
+
+# ------------------------------------------------------------------ portfolio balance
+def balance(pf):
+    from .workspace import PF_HORIZONS
+    tgt = {'H1 Core': float(pf.s.get('Target mix H1 Core %', 60)), 'H2 Adjacent': float(pf.s.get('Target mix H2 Adjacent %', 30)),
+           'H3 Emerging': float(pf.s.get('Target mix H3 Emerging %', 10))}
+    eff = defaultdict(float)
+    live = [p for p in pf.projects.values() if p['Funding'] != 'Stopped']
+    for p in live:
+        eff[p.get('Horizon') or 'Unassigned'] += p['fte_years']
+    tot = sum(eff.values()) or 1
+    rows = [{'h': h, 'fte': eff.get(h, 0), 'actual': eff.get(h, 0) / tot * 100, 'target': tgt.get(h), 'gap': eff.get(h, 0) / tot * 100 - tgt.get(h, 0)}
+            for h in PF_HORIZONS + (['Unassigned'] if eff.get('Unassigned') else [])]
+    com = defaultdict(float)
+    for p in live:
+        if p['Funding'] == 'Committed':
+            com[p.get('Horizon') or 'Unassigned'] += p['fte_years']
+    ct = sum(com.values()) or 1
+    for r in rows:
+        r['committed'] = com.get(r['h'], 0) / ct * 100
+    return rows
+
+
+# ------------------------------------------------------------------ executive narrative (SCQA)
+def exec_brief(pf, R=None):
+    k = pf.kpis()
+    ov = sorted(pf.overloads(pf.load_committed), key=lambda x: -x[2])
+    slip = sorted([p for p in pf.projects.values() if p['launch_slip'] > 0 and p['Funding'] != 'Stopped'], key=lambda p: -p['launch_slip'])
+    prop = sorted([p for p in pf.projects.values() if p['Funding'] == 'Proposed'], key=lambda p: -p['score'])
+    bal = balance(pf)
+    situation = (f'{k["projects"]} live projects: {k["committed"]} committed (${k["value_committed"]:,.0f}M lifetime value) and {k["proposed"]} proposed. '
+                 f'Committed work uses {k["util12"]:.0f}% of target engineering capacity over the next 12 months.')
+    comp = []
+    if ov:
+        pool, i, x = ov[0]
+        comp.append(f'{pool} is {x:.0f} FTE over target in {_ml(pf.months[i])} on committed work alone')
+    if slip:
+        p = slip[0]
+        hit = [d['to_name'] for d in pf.deps if d['From'] == p['ProjectID'] and not d['ok']]
+        comp.append(f'{p["Name"]} is forecast {p["launch_slip"]} months late' + (f' and now holds up {", ".join(hit)}' if hit else ''))
+    later = [p for p in prop if str(p.get('funding_result', '')).startswith('Fits if')]
+    if later:
+        comp.append(f'{len(later)} proposals worth ${sum(float(p["ValueUSDm"]) for p in later):,.0f}M only fit with a later start')
+    off = [b for b in bal if b['target'] is not None and abs(b['gap']) >= 5]
+    if off:
+        comp.append('investment mix is off target: ' + ', '.join(f'{b["h"]} {b["actual"]:.0f}% vs {b["target"]:.0f}%' for b in off))
+    complication = ('; '.join(comp) + '.') if comp else 'No capacity, schedule or balance issue stands out.'
+    question = 'How do we protect committed releases and fund the highest-value proposals within engineering capacity?'
+    ans = []
+    if ov:
+        pool = ov[0][0]
+        ans.append(f'Cover the {pool} peak with contractors or a partner now (permanent hires cannot start in time) and open permanent requisitions for the lasting need')
+    if prop:
+        p = prop[0]
+        ans.append(f'Approve {p["Name"]} (priority {p["score"]:.0f}, ${p["ValueUSDm"]:,.0f}M) to start '
+                   f'{"now" if p.get("fund_shift") == 0 else str(p.get("fund_shift")) + " months later" if p.get("fund_shift") else "after capacity is added"}')
+    if slip:
+        ans.append(f'Hold {slip[0]["Name"]}\'s recovery plan to the new date and re-baseline the projects that depend on it')
+    up = pf.upcoming_gates(90)
+    if up:
+        ans.append(f'Decide {len(up)} gates in the next 90 days, starting with {up[0]["name"]} {up[0]["Gate"]}')
+    answer = '; '.join(ans) + '.' if ans else 'Keep the current plan.'
+    return {'S': situation, 'C': complication, 'Q': question, 'A': answer, 'asks': ans}

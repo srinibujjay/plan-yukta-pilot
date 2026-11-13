@@ -37,6 +37,8 @@ PF_STAGES = ['Idea', 'Concept', 'Plan', 'Develop', 'Validate', 'Release', 'Susta
 PF_GATES = ['G0 Concept', 'G1 Plan approval', 'G2 Development commit', 'G3 Alpha', 'G4 Beta', 'G5 Release']
 PF_RAMP_TYPES = ['Permanent hire', 'Contractor', 'Partner', 'Transfer']
 PF_LEVER_EFFECTS = ['Shorter ramp (months)', 'Higher start factor', 'Productivity uplift %']
+PF_HORIZONS = ['H1 Core', 'H2 Adjacent', 'H3 Emerging']
+PF_REQ_STATUS = ['Draft', 'Submitted', 'Soft-booked', 'Hard-booked', 'Escalated', 'Rejected', 'Withdrawn']
 PF_CRITERIA = ['Value', 'Strategic fit', 'Customer demand', 'Time criticality', 'Technical risk']
 
 
@@ -339,7 +341,7 @@ TABLES = {
         'title': 'Portfolio projects', 'group': 'Portfolio', 'key': ['ProjectID'],
         'about': 'Every product, platform and enabler on the roadmap: business unit, category, lifecycle stage, dates, '
                  'funding state and the value inputs used for prioritisation.',
-        'used_by': ['Portfolio Overview', 'Roadmap', 'Prioritisation & Funding', 'Scenario Planner'],
+        'used_by': ['Portfolio Overview', 'Roadmap', 'Prioritisation & Funding Line', 'Scenario Planner'],
         'columns': [C('ProjectID'), C('Name', help='Codename.'),
                     C('BU', 'choice', choices=PF_BUS), C('Category', 'choice', choices=PF_CATEGORIES),
                     C('Stage', 'choice', choices=PF_STAGES), C('Funding', 'choice', choices=['Committed', 'Proposed', 'Stopped'],
@@ -349,6 +351,7 @@ TABLES = {
                     C('ValueUSDm', 'num', 'Lifetime value: royalty and licence NPV, $M.', lo=0, hi=100000),
                     C('StrategicFit', 'int', '1-5', lo=1, hi=5), C('CustomerDemand', 'int', '1-5', lo=1, hi=5),
                     C('TimeCriticality', 'int', '1-5: cost of delay.', lo=1, hi=5), C('TechRisk', 'int', '1-5: higher = riskier.', lo=1, hi=5),
+                    C('Horizon', 'choice', choices=PF_HORIZONS, help='Investment horizon for portfolio balance.', required=False),
                     C('JiraKey', help='Jira epic for this project (for sync).', required=False),
                     C('LinkedSKU', help='Product in the supply plan, if the project becomes silicon.', required=False),
                     C('Notes', required=False)],
@@ -356,7 +359,7 @@ TABLES = {
     'pf_gates': {
         'title': 'Lifecycle gates', 'group': 'Portfolio', 'key': ['ProjectID', 'Gate'],
         'about': 'Approval and readiness gates per project, with planned and forecast dates, status and readiness score.',
-        'used_by': ['Roadmap', 'Portfolio Board & Gates'],
+        'used_by': ['Roadmap', 'Stage Gates & Portfolio Board'],
         'columns': [C('ProjectID'), C('Gate', 'choice', choices=PF_GATES), C('Planned', 'date'),
                     C('Forecast', 'date', 'Latest expected date; blank = on plan.', required=False),
                     C('Status', 'choice', choices=['Planned', 'Passed', 'Conditional', 'Deferred', 'Failed']),
@@ -374,7 +377,7 @@ TABLES = {
     'pf_pools': {
         'title': 'Skill pools', 'group': 'Portfolio', 'key': ['Pool'],
         'about': 'Engineering capacity by skill pool: full-time equivalents today and the utilisation you plan to.',
-        'used_by': ['Resource Capacity', 'Prioritisation & Funding'],
+        'used_by': ['Capacity vs Demand', 'Prioritisation & Funding Line'],
         'columns': [C('Pool'), C('FTE', 'num', 'Engineers today.', lo=0, hi=100000), C('TargetUtilPct', 'num', lo=10, hi=120),
                     C('CostPerFTEk', 'num', 'Loaded cost per FTE-year, $k.', lo=0, hi=10000),
                     C('Countries', help='Where the pool sits, with % of its FTE, e.g. "India 70 / US 30".', required=False),
@@ -384,7 +387,7 @@ TABLES = {
     'pf_capacity_changes': {
         'title': 'Capacity changes', 'group': 'Portfolio', 'key': ['Pool', 'Month', 'Reason'],
         'about': 'Planned hires, contractors, transfers and attrition: FTE added (or removed) from a month onward.',
-        'used_by': ['Resource Capacity'],
+        'used_by': ['Capacity vs Demand'],
         'columns': [C('Pool'), C('Month', 'month'), C('DeltaFTE', 'num', lo=-10000, hi=10000),
                     C('Reason', 'choice', choices=['Hiring plan', 'Contractors', 'Transfer', 'Attrition', 'Partner'])],
     },
@@ -392,7 +395,7 @@ TABLES = {
         'title': 'FTE ramp-up profiles', 'group': 'Portfolio', 'key': ['Type'],
         'about': 'How fast new capacity becomes productive: effectiveness in the first month, months to reach full output, '
                  'the steady level reached, and the cost premium over a permanent FTE.',
-        'used_by': ['FTE Ramp & Productivity', 'Resource Capacity', 'Capacity Risk Management'],
+        'used_by': ['FTE Ramp & Productivity', 'Capacity vs Demand', 'Capacity Risk Management'],
         'columns': [C('Type', 'choice', choices=PF_RAMP_TYPES), C('StartFactor', 'num', 'Effective FTE per person in the first month (0.5 = half).', lo=0, hi=1.5),
                     C('RampMonths', 'int', 'Months to reach the steady factor.', lo=0, hi=24),
                     C('SteadyFactor', 'num', 'Effective FTE per person once ramped (1.0 = full).', lo=0, hi=1.5),
@@ -415,16 +418,27 @@ TABLES = {
         'columns': [C('RoleID'), C('Role'), C('Pool'), C('ProjectID', required=False), C('Holders', 'int', lo=0, hi=1000),
                     C('Backups', 'int', lo=0, hi=1000), C('Country', required=False), C('Notes', required=False)],
     },
+    'pf_requests': {
+        'title': 'Resource requests', 'group': 'Portfolio', 'key': ['RequestID'],
+        'about': 'Demand intake: requests from business units for engineers from a skill pool. Soft-booked requests are tentative; '
+                 'hard-booked requests are committed capacity. Reviewed at the weekly resource review.',
+        'used_by': ['Resource Requests', 'Capacity vs Demand'],
+        'columns': [C('RequestID'), C('Raised', 'date'), C('BU', 'choice', choices=PF_BUS), C('ProjectID'), C('Pool'),
+                    C('FTE', 'num', lo=0, hi=10000), C('From', 'month'), C('To', 'month'),
+                    C('Priority', 'choice', choices=['Critical', 'High', 'Medium', 'Low']),
+                    C('Status', 'choice', choices=PF_REQ_STATUS), C('Requester', required=False), C('Justification', required=False),
+                    C('Decided', 'date', required=False), C('DecisionNote', required=False)],
+    },
     'pf_demand': {
         'title': 'Resource demand', 'group': 'Portfolio', 'key': ['ProjectID', 'Pool', 'From'],
         'about': 'FTE each project needs from each pool, month by month between From and To.',
-        'used_by': ['Resource Capacity', 'Prioritisation & Funding', 'Scenario Planner'],
+        'used_by': ['Capacity vs Demand', 'Prioritisation & Funding Line', 'Scenario Planner'],
         'columns': [C('ProjectID'), C('Pool'), C('From', 'month'), C('To', 'month'), C('FTE', 'num', lo=0, hi=10000)],
     },
     'pf_value_weights': {
         'title': 'Prioritisation weights', 'group': 'Portfolio', 'key': ['Criterion'],
         'about': 'Value-based prioritisation: weight of each criterion in the priority score.',
-        'used_by': ['Prioritisation & Funding'],
+        'used_by': ['Prioritisation & Funding Line'],
         'columns': [C('Criterion', 'choice', choices=PF_CRITERIA), C('WeightPct', 'num', lo=0, hi=100), C('Notes', required=False)],
     },
     'pf_risks': {
@@ -439,7 +453,7 @@ TABLES = {
     'pf_decisions': {
         'title': 'Decision log', 'group': 'Portfolio', 'key': ['DecisionID'],
         'about': 'Decisions from the Portfolio Board and BU reviews, with conditions and actions.',
-        'used_by': ['Portfolio Board & Gates'],
+        'used_by': ['Stage Gates & Portfolio Board'],
         'columns': [C('DecisionID'), C('Date', 'date'), C('Forum', 'choice', choices=['Portfolio Board', 'BU review', 'Exec staff']),
                     C('ProjectID'), C('Gate', 'choice', choices=PF_GATES + ['-'], required=False),
                     C('Decision', 'choice', choices=['Approve', 'Approve with conditions', 'Defer', 'Re-scope', 'Stop']),
@@ -501,6 +515,9 @@ SETTINGS = {
     'Portfolio quarter start month': ('int', 1, 'Portfolio: first month of the fiscal year (1 = January).', 1, 12),
     'Apply FTE ramp-up': ('choice:Y,N', 'Y', 'Portfolio: new hires, contractors and partners start below full output (FTE ramp-up profiles).', None, None),
     'Productivity levers counted': ('choice:Approved,All,None', 'Approved', 'Portfolio: which levers raise effective capacity (Approved = Approved and In place).', None, None),
+    'Target mix H1 Core %': ('num', 60, 'Portfolio balance: share of engineering effort on the core roadmap.', 0, 100),
+    'Target mix H2 Adjacent %': ('num', 30, 'Portfolio balance: share on adjacent markets and platforms.', 0, 100),
+    'Target mix H3 Emerging %': ('num', 10, 'Portfolio balance: share on emerging bets.', 0, 100),
     'Capacity buffer %': ('num', 15, 'Tester Capacity: headroom you want above the plan.', 0, 100),
 }
 

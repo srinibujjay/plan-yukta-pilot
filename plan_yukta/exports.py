@@ -320,6 +320,14 @@ def board_pack_workbook(ws, R=None) -> bytes:
         sh.cell(row=i, column=1, value=a).font = f()
         sh.cell(row=i, column=2, value=b).font = f(bold=True)
     r0 = 5 + len(facts)
+    sh.cell(row=r0, column=1, value='Executive brief').font = f(bold=True)
+    for j, (lab, key) in enumerate((('Situation', 'S'), ('Complication', 'C'), ('Question', 'Q'), ('Answer', 'A')), start=r0 + 1):
+        c = sh.cell(row=j, column=1, value=f'{lab}: {pk["brief"][key]}')
+        c.font = f()
+        c.alignment = Alignment(wrap_text=True, vertical='top')
+        sh.merge_cells(start_row=j, start_column=1, end_row=j, end_column=6)
+        sh.row_dimensions[j].height = 48
+    r0 += 6
     sh.cell(row=r0, column=1, value='Headlines').font = f(bold=True)
     for i, s in enumerate(pk['summary'], start=r0 + 1):
         c = sh.cell(row=i, column=1, value='• ' + s)

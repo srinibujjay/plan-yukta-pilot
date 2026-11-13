@@ -44,6 +44,11 @@ ICONS = {
     'raid': 'M12 3l9 16H3zM12 10v4M12 17h.01',
     'ramp': 'M3 20h18M5 17l4-5 4 2 6-8',
     'shield': 'M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6zM9 12l2 2 4-4',
+    'inbox': 'M3 13l3-8h12l3 8v6H3zM3 13h5l1 2h6l1-2h5',
+    'compass': 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM15.5 8.5l-2 5-5 2 2-5z',
+    'grad': 'M2 9l10-5 10 5-10 5zM6 11v5c0 1.5 3 3 6 3s6-1.5 6-3v-5',
+    'calendar': 'M4 5h16v15H4zM4 9h16M8 3v4M16 3v4',
+    'book': 'M4 4h7a3 3 0 0 1 3 3v13a2 2 0 0 0-2-2H4zM20 4h-6M20 4v14h-6',
     'link': 'M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1',
     'qbr': 'M12 3l2.6 5.6 6 .7-4.5 4 1.2 6L12 16.4 6.7 19.3l1.2-6-4.5-4 6-.7z',
     'customer': 'M8 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7zM2 20c0-3.3 2.7-6 6-6s6 2.7 6 6M16 4.5a3.5 3.5 0 0 1 0 6.5M18 14c2.4.8 4 3 4 6',
@@ -76,14 +81,19 @@ NAV = [
     ('b2b', 'Procurement & B2B', 'Monthly B2B Package', 'calendar'),
     ('pf-overview', 'Portfolio & roadmaps', 'Portfolio Overview', 'portfolio'),
     ('pf-roadmap', 'Portfolio & roadmaps', 'Roadmap', 'roadmap'),
-    ('pf-capacity', 'Portfolio & roadmaps', 'Resource Capacity', 'people'),
+    ('pf-requests', 'Portfolio & roadmaps', 'Resource Requests', 'inbox'),
+    ('pf-capacity', 'Portfolio & roadmaps', 'Capacity vs Demand', 'people'),
     ('pf-fte', 'Portfolio & roadmaps', 'FTE Ramp & Productivity', 'ramp'),
     ('pf-wfrisk', 'Portfolio & roadmaps', 'Capacity Risk Management', 'shield'),
-    ('pf-priority', 'Portfolio & roadmaps', 'Prioritisation & Funding', 'rank'),
+    ('pf-priority', 'Portfolio & roadmaps', 'Prioritisation & Funding Line', 'rank'),
     ('pf-scenarios', 'Portfolio & roadmaps', 'Scenario Planner', 'scenario'),
-    ('pf-board', 'Portfolio & roadmaps', 'Portfolio Board & Gates', 'gate'),
+    ('pf-board', 'Portfolio & roadmaps', 'Stage Gates & Portfolio Board', 'gate'),
     ('pf-raid', 'Portfolio & roadmaps', 'RAID & Dependencies', 'raid'),
+    ('pf-governance', 'Portfolio & roadmaps', 'Operating Model', 'compass'),
     ('pf-integrations', 'Portfolio & roadmaps', 'Jira & Confluence', 'link'),
+    ('learn-role', 'Learn & practice', 'Role Capability Map', 'grad'),
+    ('learn-daily', 'Learn & practice', 'Daily Practice', 'calendar'),
+    ('learn-glossary', 'Learn & practice', 'ERM & Portfolio Glossary', 'book'),
     ('vendor-qbr', 'Vendors, customers & quality', 'Vendor QBR & Issues', 'qbr'),
     ('customers', 'Vendors, customers & quality', 'Customer Rating', 'customer'),
     ('postsilicon', 'Vendors, customers & quality', 'Post-Silicon Analysis', 'chip'),
@@ -102,9 +112,9 @@ NAV = [
     ('method', 'Help', 'How It Calculates', 'help'),
 ]
 
-SUB = {'m1-dashboard', 'pullin', 'flow-dashboard', 'pf-roadmap', 'pf-capacity', 'pf-fte', 'pf-wfrisk', 'pf-priority', 'pf-scenarios', 'pf-board', 'pf-raid', 'pf-integrations'}   # shown indented under the module above them
+SUB = {'m1-dashboard', 'pullin', 'flow-dashboard', 'pf-roadmap', 'pf-requests', 'pf-capacity', 'pf-fte', 'pf-wfrisk', 'pf-priority', 'pf-scenarios', 'pf-board', 'pf-raid', 'pf-governance', 'pf-integrations'}   # shown indented under the module above them
 
-GROUP_ORDER = ['Planning modules', 'Capacity & engineering', 'Procurement & B2B', 'Vendors, customers & quality', 'Portfolio & roadmaps', 'Analytics & monitoring', 'Data & setup', 'Help']
+GROUP_ORDER = ['Planning modules', 'Capacity & engineering', 'Procurement & B2B', 'Vendors, customers & quality', 'Portfolio & roadmaps', 'Learn & practice', 'Analytics & monitoring', 'Data & setup', 'Help']
 
 INFO = {
     'home': dict(
@@ -302,7 +312,7 @@ INFO = {
              'Health per project, worst of four: Schedule (gate forecast slip > 2 months or overdue = red, any slip = amber), Capacity (months where the project draws on a pool more than 5% over target: 4+ red, 1+ amber), Risk (open P×I ≥ 15 red, ≥ 9 amber), Dependencies (conflict = red).',
              'Capacity used = committed demand ÷ (headcount × target utilisation) over the next 12 months.'],
         tables=['pf_projects', 'pf_demand', 'pf_pools', 'pf_gates', 'pf_risks', 'pf_dependencies'],
-        tryit=['Read the executive summary, then open Resource Capacity from the heatmap\'s red Verification row.',
+        tryit=['Read the executive summary, then open Capacity vs Demand from the heatmap\'s red Verification row.',
                'Change Topaz\'s G5 Release forecast in Lifecycle gates and watch Jasper\'s dependency turn red or green.']),
     'pf-roadmap': dict(
         title='Roadmap',
@@ -314,7 +324,7 @@ INFO = {
         tables=['pf_projects', 'pf_gates', 'pf_dependencies', 'pf_jira', 'npi_milestones'],
         tryit=['Switch lanes to Category.', 'Filter to Proposed to see the unfunded pipeline.']),
     'pf-capacity': dict(
-        title='Resource Capacity',
+        title='Capacity vs Demand',
         summary='Engineering capacity by skill pool and month: headcount, planned hires and attrition, demand from every project, and the resource asks for the board.',
         what='Each project\'s resource demand (FTE by pool and month) is stacked against each pool\'s headcount and target utilisation. Switch between committed work only, committed plus the proposed projects that fit the funding line, and everything proposed.',
         how=['Headcount = FTE today + planned capacity changes from their month.',
@@ -347,7 +357,7 @@ INFO = {
         tryit=['Run attrition at 2× and see which projects lose their place on the funding line.',
                'Lose India from March 2027 to see the site-concentration exposure of verification and physical design.']),
     'pf-priority': dict(
-        title='Prioritisation & Funding',
+        title='Value Prioritisation & Funding Line',
         summary='Value-based priority score for every project, and a funding line that decides what fits in engineering capacity, what fits only with a later start, and what does not fit.',
         what='Committed projects take capacity first. Proposed projects are added in score order, each at the earliest start that keeps every pool at or under target utilisation. The result is a ranked portfolio with an earliest start and release date for each proposal.',
         how=['Criteria on 1-5: value (scaled across the live portfolio), strategic fit, customer demand, time criticality, and 6 − technical risk.',
@@ -366,7 +376,7 @@ INFO = {
         tryit=['Run Verification contractors: the over-target FTE-months drop and Agate moves below the line.',
                'Build a what-if: delay Basalt 3 months and see Obsidian\'s dependency go red.']),
     'pf-board': dict(
-        title='Portfolio Board & Gates',
+        title='Stage Gates & Portfolio Board',
         summary='Gate decisions coming up, a recommendation for each, the decision log, the lifecycle pipeline, and the board pack for Excel or Confluence.',
         what='Each upcoming gate gets a recommendation from its readiness checklist, the funding line, open risks and dependencies. Record the decision on the page: the gate status and the decision log update, and the board pack can be downloaded or published to Confluence.',
         how=['Approve: readiness ≥ 85% and no capacity, risk or dependency issue.',
@@ -381,6 +391,43 @@ INFO = {
         how=['Exposure = probability × impact (1-25).'],
         tables=['pf_risks', 'pf_dependencies'],
         tryit=['Close R-02 in the RAID log and see Obsidian\'s risk chip change.']),
+    'pf-requests': dict(
+        title='Resource Requests',
+        summary='Demand intake: business units raise requests for engineers; each gets a recommendation to hard-book, soft-book, escalate or defer, and the resource review records the decision.',
+        what='This is the coordination model for how resources are raised, reviewed, prioritised and booked. Hard-booked requests become committed demand everywhere in the plan; soft-booked requests hold capacity without committing it. Escalations go to the Portfolio Board with the trade-off already worked out.',
+        how=['Fit check: committed demand + the request ≤ target capacity in every month of its window.',
+             'Hard-book when it fits and the project is committed; Soft-book when it fits but the project is not yet committed; Escalate when it does not fit and is Critical or High on a committed project; otherwise Defer.',
+             'Decision cycle time = decided date − raised date (target 7 days).'],
+        tables=['pf_requests', 'pf_demand', 'pf_pools'],
+        tryit=['Hard-book RR-202 (Topaz physical design) and see it appear in Capacity vs Demand.',
+               'Raise a request for 10 verification FTE from January and read the recommendation.']),
+    'pf-governance': dict(
+        title='Operating Model & Governance',
+        summary='How the roadmap and capacity function runs: operating model, planning cadence, decision rights, roadmap standards with a decision-ready score, investment balance and the function\'s own KPIs.',
+        what='Roadmaps are only useful if they meet a standard and are used in decisions. Each project is scored against roadmap standards; the cadence shows which forum decides what, the RACI who decides, and the KPIs whether the function is working.',
+        how=['Standards score = weighted share of checks passed (owner, value case, confidence, gates dated, readiness, demand, Jira link, risks where needed, no dependency conflict, slips explained).',
+             'Decision-ready ≥ 90%, needs work ≥ 70%, otherwise not ready.',
+             'Investment balance = share of engineering FTE-years by horizon (H1 core, H2 adjacent, H3 emerging) against the targets in Plan settings.'],
+        tables=['pf_projects', 'pf_gates', 'pf_risks', 'pf_requests', 'settings'],
+        tryit=['Give Beryl an owner and a risk in the RAID log and watch it become decision-ready.',
+               'Set Target mix H3 Emerging % to 20 and read the balance gap.']),
+    'learn-role': dict(
+        title='Role Capability Map',
+        summary='Every responsibility and skill in the Portfolio & Product Planning Director profile mapped to the ERM practice, the page that demonstrates it, live evidence and a talking point.',
+        what='Use it to prepare and to rehearse: each row gives the practice in ERM and portfolio language, where you can show it in Plan Yukta, a number from today\'s data and a 60-second talking point built from that number.',
+        how=['Talking points are generated from the current data, so they change when you change a table or run a scenario.'],
+        tables=[], tryit=['Pick one row a day and say the talking point out loud in under a minute.']),
+    'learn-daily': dict(
+        title='Daily Practice',
+        summary='A new set every day: one concept, one data drill from live numbers, one leadership question and one executive-narrative drill, with answer frameworks, a 60-second timer and a practice streak.',
+        what='The set is chosen by date, so it changes every day and repeats only after the whole bank has been used. Data drills use the live plan, so changing data gives new drills. Your streak and ratings stay in this browser.',
+        how=['Answer frameworks: STAR for experience questions; SCQA for executive narratives; Recommendation-Options-Trade-offs-Ask for decisions.'],
+        tables=[], tryit=['Do today\'s four items, rate yourself, and come back tomorrow.']),
+    'learn-glossary': dict(
+        title='ERM & Portfolio Glossary',
+        summary='Enterprise resource management, strategic portfolio management and roadmap vocabulary, each term with a plain definition, why it matters and where it lives in Plan Yukta.',
+        what='Use the words the way portfolio and resource management platforms and portfolio offices use them, and know where each one sits in the tool.',
+        how=['Filter with the search box; click a page to see the concept in use.'], tables=[], tryit=['Learn five terms a day and use them in your talking points.']),
     'pf-integrations': dict(
         title='Jira & Confluence',
         summary='Pull epic status and progress from Jira into the roadmap, and publish the board pack to a Confluence page.',
@@ -537,5 +584,7 @@ TOUR = [
     ('pf-wfrisk', 'Manage capacity risk', 'The register lists attrition, hiring lead time, key-person and site risks with actions and dates. Run attrition at 2× or lose a country and see which projects drop.'),
     ('pf-scenarios', 'Test a scenario', 'Run "Verification contractors": over-target FTE-months fall and every proposal moves up the funding line. Then build your own what-if and save it.'),
     ('pf-board', 'Take it to the Portfolio Board', 'Each gate gets a recommendation from readiness, capacity, risk and dependencies. Record a decision and download the board pack, or publish it to Confluence.'),
+    ('pf-requests', 'Run the resource review', 'Requests come through one front door. Hard-book what fits, soft-book what waits for a gate, and escalate the Obsidian verification request that does not fit.'),
+    ('learn-daily', 'Practise every day', 'Four items a day built from the live plan: a concept, a data drill, a leadership question and a two-minute executive narrative.'),
     ('io', 'Use your own data', 'Download the workspace as Excel, replace the demo rows with your own (anonymised if needed), and upload it. Every module then runs on your data.'),
 ]

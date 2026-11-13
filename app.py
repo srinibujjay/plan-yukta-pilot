@@ -25,7 +25,7 @@ import markdown
 from flask import (Flask, Response, abort, jsonify, redirect, render_template, request, send_file,
                    send_from_directory, session, url_for)
 
-from plan_yukta import assistant, cockpit, exports, modules, views, pf_views, integrations as IG
+from plan_yukta import assistant, cockpit, exports, modules, views, pf_views, learn, integrations as IG
 from plan_yukta import workspace as W
 
 HERE = Path(__file__).parent
@@ -223,7 +223,8 @@ BUILDERS = {
 PF_BUILDERS = {
     'pf-overview': pf_views.overview, 'pf-roadmap': pf_views.roadmap, 'pf-capacity': pf_views.capacity, 'pf-priority': pf_views.priority,
     'pf-scenarios': pf_views.scenario, 'pf-board': pf_views.board, 'pf-raid': pf_views.raid, 'pf-integrations': pf_views.integrations,
-    'pf-fte': pf_views.fte, 'pf-wfrisk': pf_views.wfrisk,
+    'pf-fte': pf_views.fte, 'pf-wfrisk': pf_views.wfrisk, 'pf-requests': pf_views.requests_page, 'pf-governance': pf_views.governance,
+    'learn-role': learn.role_map, 'learn-daily': learn.daily, 'learn-glossary': learn.glossary,
 }
 
 
@@ -984,6 +985,48 @@ def pf_gate_decide():
         _mark_edited(ws, t)
     W.save(wsid, ws)
     return _pf_back('pf-board', msg=f'Recorded: {dec} for {pid} {gate}. Gate status, decision log and funding updated.')
+
+
+@app.post('/pf/request/decide')
+def pf_request_decide():
+    wsid, ws = ws_get()
+    rid, st = request.form.get('id'), request.form.get('status')
+    rows = ws['tables'].get('pf_requests', [])
+    r = next((x for x in rows if x['RequestID'] == rid), None)
+    if not r or st not in W.PF_REQ_STATUS:
+        return _pf_back('pf-requests', err='That request is no longer in the queue.')
+    r['Status'] = st
+    r['Decided'] = str(W.settings_dict(ws).get('As-of date'))[:10]
+    r['DecisionNote'] = (request.form.get('note') or '').strip()[:200] or f'{st} at the resource review.'
+    clean, errors = W.validate_rows('pf_requests', rows)
+    if errors:
+        return _pf_back('pf-requests', err=f'{errors[0][1]}: {errors[0][2]}.')
+    ws['tables']['pf_requests'] = clean
+    _mark_edited(ws, 'pf_requests')
+    W.save(wsid, ws)
+    extra = ' It now counts as committed demand in Capacity vs Demand.' if st == 'Hard-booked' else ''
+    return _pf_back('pf-requests', msg=f'{rid}: {st}.{extra}')
+
+
+@app.post('/pf/request/add')
+def pf_request_add():
+    wsid, ws = ws_get()
+    f = request.form
+    rows = list(ws['tables'].get('pf_requests', []))
+    nums = [int(r['RequestID'][3:]) for r in rows if str(r.get('RequestID', '')).startswith('RR-') and r['RequestID'][3:].isdigit()]
+    proj = {p['ProjectID']: p for p in ws['tables'].get('pf_projects', [])}
+    pid = f.get('ProjectID')
+    row = {'RequestID': f'RR-{(max(nums) + 1) if nums else 201}', 'Raised': str(W.settings_dict(ws).get('As-of date'))[:10],
+           'BU': (proj.get(pid) or {}).get('BU'), 'ProjectID': pid, 'Pool': f.get('Pool'), 'FTE': f.get('FTE'),
+           'From': f.get('From'), 'To': f.get('To'), 'Priority': f.get('Priority'), 'Status': 'Submitted', 'Requester': None,
+           'Justification': (f.get('Justification') or '').strip()[:200] or None, 'Decided': None, 'DecisionNote': None}
+    clean, errors = W.validate_rows('pf_requests', rows + [row])
+    if errors:
+        return _pf_back('pf-requests', err=f'{errors[0][1]}: {errors[0][2]}. The request was not added.')
+    ws['tables']['pf_requests'] = clean
+    _mark_edited(ws, 'pf_requests')
+    W.save(wsid, ws)
+    return _pf_back('pf-requests', msg=f'{row["RequestID"]} submitted: see its recommendation in the queue.')
 
 
 @app.post('/pf/integrations/save')

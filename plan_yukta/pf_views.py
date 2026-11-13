@@ -238,7 +238,7 @@ def roadmap(R, args, ws):
         K('Releases in the next 12 months', str(sum(1 for p in projs if pf.start <= p['launch_fc'] <= month_add(pf.start, 11) and p['Funding'] != 'Stopped')), ''),
         K('Slipping releases', str(k['slipping']), 'forecast later than target', 'bad' if k['slipping'] else 'ok'),
         K('Dependency conflicts', str(k['dep_conflicts']), 'a project launches before what it needs', 'bad' if k['dep_conflicts'] else 'ok'),
-        K('Gates in the next 90 days', str(len(pf.upcoming_gates(90))), 'see Portfolio Board & Gates'),
+        K('Gates in the next 90 days', str(len(pf.upcoming_gates(90))), 'see Stage Gates & Portfolio Board'),
     ]}]
     sections.append(chart('Roadmap', charts.roadmap(lanes, st, en, today=[(pf.as_of, 'today', 'today')], deps=deps),
                           'Bars run from start to target release; red extension = forecast slip. Diamonds are gates: green passed, amber conditional, '
@@ -525,6 +525,12 @@ def board(R, args, ws):
         K('Overdue gates', str(len(overdue)), 'planned date passed without a decision', 'bad' if overdue else 'ok'),
         K('Decisions logged', str(len(ws['tables'].get('pf_decisions', []))), 'Decision log'),
     ]})
+    b = PF.exec_brief(pf, R)
+    sections.append(html('<section class="panel insights"><h2>Executive brief (SCQA)</h2>'
+                         f'<p><b>Situation.</b> {_e(b["S"])}</p><p><b>Complication.</b> {_e(b["C"])}</p>'
+                         f'<p><b>Question.</b> {_e(b["Q"])}</p><p><b>Answer.</b> {_e(b["A"])}</p>'
+                         '<p class="muted small">Situation, Complication, Question, Answer: the structure for a board paper or a two-minute verbal update. '
+                         'Written from the data each time.</p></section>'))
     trs = []
     for g in up:
         rec, tone, why = recommend(pf, g)
@@ -845,3 +851,161 @@ def wfrisk(R, args, ws):
                                         col('Holders', 'Holders', 'int'), col('cover', 'Cover', 'badge', tone='b_t'), col('Country', 'Country')],
                           kr_rows, search=False, note='Edit in Key roles. A role with no backup is a key-person risk.'))
     return page('pf-wfrisk', sections)
+
+
+# ------------------------------------------------------------------ resource requests (demand intake)
+REC_TONE = {'Hard-book': 'ok', 'Hard-booked': 'ok', 'Soft-book': 'info', 'Escalate': 'bad', 'Defer': 'warn', 'Reject': 'bad', 'Rejected': 'bad',
+            'Withdrawn': ''}
+
+
+def requests_page(R, args, ws):
+    pf = PF.Portfolio(ws)
+    ev = PF.evaluate_requests(pf)
+    open_ = [r for r in ev if r['Status'] in ('Draft', 'Submitted', 'Soft-booked', 'Escalated')]
+    hard_fte = sum(r['FTE'] for r in ev if r['Status'] == 'Hard-booked')
+    soft = sum(sum(v) for v in pf.soft.values())
+    decided = [r for r in ev if r.get('Decided') and r.get('Raised')]
+    cyc = [(to_date(r['Decided']) - to_date(r['Raised'])).days for r in decided if to_date(r['Decided']) and to_date(r['Raised'])]
+    sections = [{'type': 'kpis', 'items': [
+        K('Open requests', str(len(open_)), f'{sum(1 for r in open_ if r["rec"] == "Escalate")} to escalate to the Portfolio Board',
+          'bad' if any(r['rec'] == 'Escalate' for r in open_) else 'ok'),
+        K('Hard-booked', f'{hard_fte:,.0f} FTE', 'committed on top of the plan'),
+        K('Soft-booked', f'{soft:,.0f} FTE-months', 'tentative holds, not in committed capacity'),
+        K('Decision cycle time', f'{sum(cyc) / len(cyc):.0f} days' if cyc else '–', 'raised → decided, target 7 days',
+          'ok' if cyc and sum(cyc) / len(cyc) <= 7 else 'warn'),
+    ]}]
+    sections.append(callout('<b>How requests flow</b>: Draft → Submitted → reviewed at the weekly resource review → '
+                            '<b>Soft-booked</b> (capacity held, not committed) → <b>Hard-booked</b> (committed, counts in capacity) — or Escalated to the '
+                            'Portfolio Board, Rejected or Withdrawn. The recommendation checks target capacity on committed work, the project\'s funding state and priority.', 'info'))
+    trs = []
+    for r in ev:
+        act = ''
+        if r['Status'] not in ('Hard-booked', 'Rejected', 'Withdrawn'):
+            opts = ''.join(f'<option {"selected" if o == {"Hard-book": "Hard-booked", "Soft-book": "Soft-booked", "Escalate": "Escalated", "Defer": "Rejected", "Reject": "Rejected"}.get(r["rec"]) else ""}>{o}</option>'
+                           for o in ('Hard-booked', 'Soft-booked', 'Escalated', 'Rejected', 'Withdrawn'))
+            act = (f'<form method="post" action="/pf/request/decide" class="decform"><input type="hidden" name="id" value="{_e(r["RequestID"])}">'
+                   f'<select name="status" aria-label="Decision">{opts}</select><input name="note" maxlength="200" placeholder="Note" aria-label="Decision note">'
+                   f'<button class="btn sm" type="submit">Record</button></form>')
+        trs.append(f'<tr><td class="nw">{_e(r["RequestID"])}<div class="muted small">{_e(r["Raised"])}</div></td>'
+                   f'<td><b>{_e(r["project"])}</b><div class="muted small">{_e(r["BU"])} · {_e(r.get("Requester"))}</div>'
+                   f'<div class="small wrap">{_e(r.get("Justification"))}</div></td>'
+                   f'<td>{_e(r["Pool"])}</td><td class="r">{r["FTE"]:.0f}</td><td class="nw">{mlabel(r["From"])} – {mlabel(r["To"])}</td>'
+                   f'<td><span class="badge {"bad" if r["Priority"] == "Critical" else "warn" if r["Priority"] == "High" else "info"}">{_e(r["Priority"])}</span></td>'
+                   f'<td>{_e(r["Status"])}</td><td class="r">{r["cost"]:.2f}</td>'
+                   f'<td><span class="badge {REC_TONE.get(r["rec"], "")}">{_e(r["rec"])}</span><div class="muted small wrap">{_e(r["why"])}</div></td>'
+                   f'<td>{act}</td></tr>')
+    sections.append(html('<section class="panel"><h2>Request queue</h2><p class="sub">Ordered by status, priority and project score. Record the resource-review decision; '
+                         'hard-booking adds the FTE to committed demand everywhere in the plan.</p><div class="tablewrap"><table><thead><tr><th>Request</th><th>Project</th>'
+                         '<th>Pool</th><th class="r">FTE</th><th>Window</th><th>Priority</th><th>Status</th><th class="r">Cost $M</th><th>Recommendation</th>'
+                         '<th>Decision</th></tr></thead><tbody>' + ''.join(trs) + '</tbody></table></div></section>'))
+    pools = list(pf.supply)
+    proj_opts = ''.join(f'<option value="{_e(pid)}">{_e(p["Name"])}</option>' for pid, p in pf.projects.items() if p['Funding'] != 'Stopped')
+    form = (f'<details class="addform"><summary class="btn ghost sm">+ Raise a resource request</summary>'
+            f'<form method="post" action="/pf/request/add" class="formgrid" style="margin-top:12px">'
+            f'<label>Project<select name="ProjectID">{proj_opts}</select></label>'
+            f'<label>Pool<select name="Pool">{"".join(f"<option>{_e(x)}</option>" for x in pools)}</select></label>'
+            f'<label>FTE<input type="number" name="FTE" min="0.5" step="0.5" value="2"></label>'
+            f'<label>From<input type="month" name="From" value="{_e(pf.start)}"></label><label>To<input type="month" name="To" value="{_e(month_add(pf.start, 5))}"></label>'
+            f'<label>Priority<select name="Priority"><option>High</option><option>Critical</option><option>Medium</option><option>Low</option></select></label>'
+            f'<label style="grid-column:span 2">Justification<input name="Justification" maxlength="200"></label>'
+            f'<div><button class="btn" type="submit">Submit</button></div></form></details>')
+    sections.append(html(f'<section class="panel">{form}</section>'))
+    # pool view: soft vs hard against capacity
+    rows = []
+    for x in pools:
+        rows.append({'pool': x, 'cap': max(pf.supply[x][i] * pf.target[x] for i in range(pf.H)) if pf.H else 0,
+                     'com': max(pf.load_committed[x]) if pf.H else 0, 'soft': max(pf.soft[x]) if pf.H else 0,
+                     'head': max(pf.supply[x][i] * pf.target[x] - pf.load_committed[x][i] - pf.soft[x][i] for i in range(min(12, pf.H))) if pf.H else 0,
+                     'tight': min(pf.supply[x][i] * pf.target[x] - pf.load_committed[x][i] - pf.soft[x][i] for i in range(min(12, pf.H))) if pf.H else 0})
+    sections.append(table('Booking position by pool (next 12 months)', [col('pool', 'Pool'), col('cap', 'Target capacity (peak)', 'num1'),
+                                                                        col('com', 'Committed peak', 'num1'), col('soft', 'Soft-booked peak', 'num1'),
+                                                                        col('tight', 'Tightest headroom', 'num1'), col('head', 'Best headroom', 'num1')],
+                          rows, search=False, note='Headroom = target capacity − committed − soft-booked, by month. Negative = over-booked.'))
+    return page('pf-requests', sections)
+
+
+# ------------------------------------------------------------------ operating model and governance
+CADENCE = [
+    ('Weekly', 'Resource review', 'Capacity managers, BU planners, engineering directors',
+     'New and changed resource requests; soft → hard bookings; over-booked pools', 'Booking decisions; escalations', 'Resource Requests'),
+    ('Monthly', 'Portfolio review', 'Head of Portfolio, BU leads, Finance, Engineering',
+     'Roadmap health, slips, capacity heatmap, RAID, Jira drift', 'Re-plans, corrective actions, items for the board', 'Portfolio Overview'),
+    ('Monthly', 'Capacity & scenario review', 'Roadmap & capacity team, Engineering, HR',
+     'Capacity vs demand, hiring and ramp-up, stress tests, scenarios', 'Hiring/contractor asks; adopted scenario', 'Scenario Planner'),
+    ('Quarterly', 'Portfolio Board', 'Executives, BU heads, CFO delegate, Head of Portfolio',
+     'Gate decisions, funding line, investment balance, capacity asks', 'Approve / defer / stop; funding; capacity', 'Stage Gates & Portfolio Board'),
+    ('Quarterly', 'Roadmap refresh', 'Product management, BU leads, architecture',
+     'Roadmap standards check, dependencies, confidence, Now / Next / Later', 'Published roadmap baseline', 'Roadmap'),
+    ('Annual', 'Strategic and long-range plan', 'Executives, Strategy, Finance',
+     'Investment themes, horizon mix targets, multi-year capacity plan', 'Targets, budget envelope, headcount plan', 'Portfolio Overview'),
+]
+RACI = [  # decision, R, A, C, I
+    ('Raise a resource request', 'BU planner', 'BU lead', 'Capacity manager', 'Engineering director'),
+    ('Soft / hard book capacity', 'Capacity manager', 'Roadmap & capacity director', 'Engineering director, BU lead', 'Finance'),
+    ('Roadmap change (date, scope)', 'Product manager', 'BU lead', 'Roadmap & capacity director, Engineering', 'Commercial, Portfolio Board'),
+    ('Gate approval (G1/G2)', 'Project lead', 'Portfolio Board', 'Finance, Engineering, Commercial', 'All BUs'),
+    ('Hiring / contractor ask', 'Roadmap & capacity director', 'Head of Portfolio (budget holder)', 'HR, Finance, Engineering', 'BU leads'),
+    ('Adopt a scenario as the plan', 'Roadmap & capacity director', 'Head of Portfolio', 'BU leads, Engineering, Finance', 'Portfolio Board'),
+    ('Roadmap standards', 'Roadmap & capacity director', 'Head of Portfolio', 'Product managers', 'All planners'),
+]
+
+
+def governance(R, args, ws):
+    pf = PF.Portfolio(ws)
+    q = PF.roadmap_quality(pf)
+    bal = PF.balance(pf)
+    k = pf.kpis()
+    ev = PF.evaluate_requests(pf)
+    gl = [g for gs in pf.gates.values() for g in gs if g['Status'] != 'Passed']
+    avg_slip = sum(max(0, g['slip']) for g in gl) / len(gl) if gl else 0
+    ready = sum(1 for r in q if r['status'] == 'Decision-ready')
+    cyc = [(to_date(r['Decided']) - to_date(r['Raised'])).days for r in ev if r.get('Decided') and to_date(r['Decided']) and to_date(r.get('Raised'))]
+    sections = [{'type': 'kpis', 'items': [
+        K('Roadmap decision-ready', f'{ready} of {len(q)}', f'average standards score {sum(r["score"] for r in q) / max(1, len(q)):.0f}%',
+          'ok' if ready == len(q) else 'warn'),
+        K('Schedule predictability', f'{avg_slip:.1f} months', 'average slip of open gates', 'ok' if avg_slip < 0.5 else 'warn'),
+        K('Capacity used (12 months)', f'{k["util12"]:.0f}%', 'committed vs target capacity'),
+        K('Request cycle time', f'{sum(cyc) / len(cyc):.0f} days' if cyc else '–', 'raised → decided'),
+    ]}]
+    sections.append(html('<section class="panel"><h2>Operating model</h2><p class="sub">How roadmap and capacity planning runs: '
+                         '<b>demand intake</b> (resource requests, proposals) → <b>evaluation</b> (value score, capacity check, scenarios) → '
+                         '<b>decision</b> (resource review, Portfolio Board, gates) → <b>execution and tracking</b> (Jira, gates, RAID) → '
+                         '<b>learning</b> (planning KPIs, standards, retrospectives). One data model feeds every forum, so each forum sees the same numbers.</p></section>'))
+    crow = []
+    for f, forum, who, inp, out, where in CADENCE:
+        crow.append({'f': f, 'forum': forum, 'who': who, 'inp': inp, 'out': out, 'where': where,
+                     'link': f'/m/{next((kk for kk, _, lbl, _ in _nav() if lbl == where), "pf-overview")}'})
+    sections.append(table('Planning cadence', [col('f', 'Rhythm'), col('forum', 'Forum'), col('who', 'Who'), col('inp', 'Reviews'), col('out', 'Decides'),
+                                               col('where', 'Page', 'link')], crow, search=False,
+                          note='The execution rhythm: weekly bookings, monthly portfolio and capacity reviews, quarterly board and roadmap refresh, annual plan.'))
+    sections.append(table('Decision rights (RACI)', [col('d', 'Decision'), col('r', 'Responsible'), col('a', 'Accountable'), col('c', 'Consulted'), col('i', 'Informed')],
+                          [{'d': d, 'r': r, 'a': a, 'c': c, 'i': i} for d, r, a, c, i in RACI], search=False))
+    qrows = [dict(r, s_t=('ok' if r['status'] == 'Decision-ready' else 'warn' if r['status'] == 'Needs work' else 'bad'),
+                  miss=', '.join(r['missing']) or '–') for r in q]
+    sections.append(table('Roadmap standards: is each project decision-ready?', [col('name', 'Project'), col('stage', 'Stage'), col('funding', 'Funding'),
+                                                                                 col('score', 'Standards score %', 'num0'), col('status', 'Status', 'badge', tone='s_t'),
+                                                                                 col('miss', 'What is missing')], qrows, search=False,
+                          note='Weighted checks: ' + ', '.join(f'{n} ({w})' for n, w in PF.QUALITY_CHECKS) + '. Decision-ready ≥ 90%, needs work ≥ 70%.'))
+    sections.append(cols2(
+        chart('Investment balance by horizon', charts.bars([b['h'] for b in bal], [('All live', [b['actual'] for b in bal]), ('Committed', [b['committed'] for b in bal])],
+                                                           stacked=False, unit='%', title='Mix %'),
+              'Share of engineering FTE-years. Targets: ' + ', '.join(f'{b["h"]} {b["target"]:.0f}%' for b in bal if b['target'] is not None) + ' (Plan settings).'),
+        table('Balance vs target', [col('h', 'Horizon'), col('fte', 'FTE-years', 'num0'), col('actual', 'All live %', 'num0'), col('committed', 'Committed %', 'num0'),
+                                    col('target', 'Target %', 'num0'), col('gap', 'Gap (pts)', 'num0')], bal, search=False)))
+    kpi = [
+        {'k': 'Roadmap decision-readiness', 'v': f'{ready}/{len(q)}', 't': 'All live projects', 'why': 'Roadmaps used in decisions must meet the standard'},
+        {'k': 'Gate schedule predictability', 'v': f'{avg_slip:.1f} months avg slip', 't': '< 0.5 month', 'why': 'Trust in roadmap dates'},
+        {'k': 'Capacity utilisation vs target', 'v': f'{k["util12"]:.0f}%', 't': '85-95% of target', 'why': 'Neither idle nor overloaded teams'},
+        {'k': 'Over-target FTE-months', 'v': f'{k["overload_fte_m"]:.0f}', 't': '0 on committed work', 'why': 'Committed plans must be staffable'},
+        {'k': 'Request decision cycle time', 'v': f'{sum(cyc) / len(cyc):.0f} days' if cyc else '–', 't': '≤ 7 days', 'why': 'BUs get answers within a week'},
+        {'k': 'Value fundable within capacity', 'v': f'${k["value_fundable"]:,.0f}M', 't': 'Rising', 'why': 'Capacity aimed at the highest value'},
+        {'k': 'Dependency conflicts', 'v': str(k['dep_conflicts']), 't': '0', 'why': 'Integrated roadmap, not separate plans'},
+    ]
+    sections.append(table('Planning function KPIs', [col('k', 'KPI'), col('v', 'Now'), col('t', 'Target'), col('why', 'Why it matters')], kpi, search=False,
+                          note='Measurable outcomes for the roadmap and capacity function itself.'))
+    return page('pf-governance', sections)
+
+
+def _nav():
+    from .modules import NAV
+    return NAV

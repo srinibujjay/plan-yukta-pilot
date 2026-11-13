@@ -71,6 +71,14 @@ FAQ = [
      'Capacity Risk Management lists risks to engineering capacity from the data: attrition drag, hiring lead time, ramp-up timing, '
      'contractor dependency, site concentration, burnout and key roles without backup, each with a mitigation and date. A stress test '
      'raises attrition, freezes hiring, removes contractors or a country, and shows which pools and projects break.'),
+    ('Resource requests, soft and hard booking',
+     'Resource Requests is the demand-intake front door: a business unit asks for FTE from a skill pool for a project and window. '
+     'Soft-booked requests hold capacity without committing it; hard-booked requests count as committed demand. Each request gets a '
+     'recommendation (hard-book, soft-book, escalate to the Portfolio Board, or defer) from a capacity fit check.'),
+    ('Operating model, roadmap standards and practice',
+     'Operating Model shows the planning cadence (weekly resource review, monthly portfolio and capacity reviews, quarterly board, '
+     'annual plan), decision rights (RACI), a decision-ready score for each roadmap entry, investment balance by horizon and the planning '
+     'KPIs. Learn & practice has a role capability map, a daily practice set with live data drills and a 60-second timer, and a glossary.'),
     ('Jira and Confluence',
      'Jira & Confluence connects an Atlassian Cloud site with an email and API token. It reads epics and child-issue counts from '
      'Jira (read-only) and compares due dates with the roadmap, and publishes the Portfolio Board pack as a Confluence page. '

@@ -105,7 +105,40 @@ def build(as_of='2026-11-10'):
         proj.append(dict(ProjectID=pid, Name=name, BU=bu, Category=cat, Stage=stage, Funding=fund, Start=st, Launch=la, Owner=own,
                          Confidence=conf, ValueUSDm=val, StrategicFit=fit, CustomerDemand=dem, TimeCriticality=tc, TechRisk=risk,
                          JiraKey=jk, LinkedSKU=sku, Notes=note))
+    hz = {'PF-01': 'H1 Core', 'PF-02': 'H2 Adjacent', 'PF-03': 'H1 Core', 'PF-04': 'H1 Core', 'PF-05': 'H1 Core', 'PF-06': 'H2 Adjacent',
+          'PF-07': 'H2 Adjacent', 'PF-08': 'H1 Core', 'PF-09': 'H1 Core', 'PF-10': 'H1 Core', 'PF-11': 'H2 Adjacent', 'PF-12': 'H2 Adjacent',
+          'PF-13': 'H3 Emerging', 'PF-14': 'H1 Core', 'PF-15': 'H3 Emerging', 'PF-16': 'H1 Core'}
+    for p in proj:
+        p['Horizon'] = hz.get(p['ProjectID'])
+        if p['ProjectID'] in ('PF-07', 'PF-15'):
+            p['Owner'] = None          # roadmap-standards gaps for the governance page
     t['pf_projects'] = proj
+    t['pf_requests'] = [
+        dict(RequestID='RR-201', Raised='2026-10-28', BU='Infrastructure', ProjectID='PF-02', Pool='Verification', FTE=6, From='2027-01', To='2027-06',
+             Priority='Critical', Status='Submitted', Requester='Infra CSS lead', Justification='Coherency verification scope grew after the mesh alpha.',
+             Decided=None, DecisionNote=None),
+        dict(RequestID='RR-202', Raised='2026-10-30', BU='Client', ProjectID='PF-04', Pool='Physical design', FTE=3, From='2026-12', To='2027-03',
+             Priority='High', Status='Submitted', Requester='Client GPU lead', Justification='Recover the alpha slip: timing closure on the shader core.',
+             Decided=None, DecisionNote=None),
+        dict(RequestID='RR-203', Raised='2026-10-14', BU='Platform', ProjectID='PF-13', Pool='Architecture', FTE=2, From='2026-12', To='2027-03',
+             Priority='Medium', Status='Soft-booked', Requester='AI IP lead', Justification='Architecture options study ahead of G1.',
+             Decided='2026-10-21', DecisionNote='Soft-booked pending the G1 business case.'),
+        dict(RequestID='RR-204', Raised='2026-09-30', BU='IoT', ProjectID='PF-09', Pool='Software & tools', FTE=2, From='2027-01', To='2027-09',
+             Priority='Medium', Status='Soft-booked', Requester='IoT lead', Justification='Neural-unit runtime and examples.',
+             Decided='2026-10-07', DecisionNote='Soft-booked; confirm after the Mica development commit.'),
+        dict(RequestID='RR-205', Raised='2026-09-16', BU='Automotive', ProjectID='PF-06', Pool='Program management', FTE=1, From='2026-11', To='2027-12',
+             Priority='High', Status='Hard-booked', Requester='Auto CPU lead', Justification='Safety-case coordinator for the alpha and beta.',
+             Decided='2026-09-23', DecisionNote='Approved at the resource review.'),
+        dict(RequestID='RR-206', Raised='2026-11-04', BU='Infrastructure', ProjectID='PF-01', Pool='Verification', FTE=4, From='2027-02', To='2027-05',
+             Priority='High', Status='Submitted', Requester='Infra CPU lead', Justification='Formal verification for the memory-tagging unit.',
+             Decided=None, DecisionNote=None),
+        dict(RequestID='RR-207', Raised='2026-11-06', BU='Infrastructure', ProjectID='PF-15', Pool='Architecture', FTE=1, From='2027-01', To='2027-06',
+             Priority='Low', Status='Draft', Requester='Chiplet lead', Justification='Track the interface standard and draft options.',
+             Decided=None, DecisionNote=None),
+        dict(RequestID='RR-208', Raised='2026-08-26', BU='Automotive', ProjectID='PF-07', Pool='Verification', FTE=5, From='2026-10', To='2027-03',
+             Priority='Medium', Status='Rejected', Requester='Auto CSS lead', Justification='Early verification environment.',
+             Decided='2026-09-02', DecisionNote='Rejected: Beryl is not past plan approval; reuse the Onyx environment later.'),
+    ]
     t['pf_pools'] = [dict(Pool=p, FTE=f, TargetUtilPct=u, CostPerFTEk=c, Countries=s, AttritionPct=a, HiringLeadMonths=l)
                      for p, f, u, c, s, a, l in POOLS]
     t['pf_ramp'] = [

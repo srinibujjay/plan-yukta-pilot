@@ -404,3 +404,8 @@ pre.code { background: var(--panel2); border: 1px solid var(--line); border-radi
 .decform { display: grid; grid-template-columns: 1fr auto; gap: 4px; min-width: 230px; }
 .decform select { grid-column: 1 / -1; font-size: 12px; padding: 4px 6px; }
 .decform input { font-size: 12px; padding: 4px 6px; min-width: 0; }
+.practice .pq { font-size: 16px; font-weight: 600; line-height: 1.45; margin: 4px 0 10px; }
+.practice details { margin-top: 8px; } .practice details > summary { list-style: none; cursor: pointer; display: inline-flex; }
+.practice details > summary::-webkit-details-marker { display: none; }
+.practice .rate { margin-left: auto; display: inline-flex; gap: 6px; align-items: center; font-size: 12px; color: var(--muted); flex-wrap: wrap; }
+.practice .chip.on { background: var(--accent); color: #fff; border-color: var(--accent); }
