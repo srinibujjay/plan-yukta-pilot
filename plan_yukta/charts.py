@@ -16,7 +16,7 @@ def _fmt(v):
     if a >= 1e6:
         return f'{v / 1e6:.1f}M'
     if a >= 1e3:
-        return f'{v / 1e3:.0f}k'
+        return f'{v / 1e3:.0f}k' if a >= 1e4 or abs(v / 1e3 - round(v / 1e3)) < 0.05 else f'{v / 1e3:.1f}k'
     if a >= 10 or v == 0:
         return f'{v:.0f}'
     return f'{v:.1f}'
@@ -221,5 +221,96 @@ def donut(items, title='', unit=''):
         out.append(f'<rect class="{PALETTE[i % 8]}" x="205" y="{y - 10}" width="12" height="12" rx="3"/>'
                    f'<text class="dn-l" x="224" y="{y}">{escape(lab)}</text>'
                    f'<text class="dn-n" x="426" y="{y}" text-anchor="end">{_fmt(v)} · {max(0, v) / tot * 100:.0f}%</text>')
+    out.append('</svg>')
+    return '<figure class="fig">' + ''.join(out) + '</figure>'
+
+
+def roadmap(lanes, start, end, today=None, deps=None):
+    """Swimlane roadmap.
+    lanes: [(lane label, [item])]; item: {'id', 'name', 'start': date, 'end': date, 'fc_end': date|None, 'cls': str,
+           'gates': [(date, label, state)], 'tip': str}. state: passed | planned | late | conditional.
+    deps: [(from id, to id, ok)] drawn as connectors from the end of one bar to the end of the other."""
+    from datetime import date
+    W, L, R, T, rowh, laneh = 1000, 150, 16, 30, 26, 22
+    n_rows = sum(len(items) for _, items in lanes)
+    H = T + n_rows * rowh + len(lanes) * laneh + 16
+    span = max(1, (end - start).days)
+    x = lambda d: L + (W - L - R) * (min(max((d - start).days, 0), span) / span)
+    out = [f'<svg class="chart roadmap" viewBox="0 0 {W} {H}" role="img" aria-label="Roadmap">']
+    y0 = T
+    q = date(start.year, ((start.month - 1) // 3) * 3 + 1, 1)
+    while q <= end:
+        if q >= start:
+            xx = x(q)
+            out.append(f'<line class="grid{" yr" if q.month == 1 else ""}" x1="{xx:.1f}" x2="{xx:.1f}" y1="{T - 8}" y2="{H - 8}"/>'
+                       f'<text class="ax" x="{xx + 3:.1f}" y="{T - 14}">{"Q" + str((q.month - 1) // 3 + 1)}{" " + str(q.year) if q.month == 1 or q == start else ""}</text>')
+        q = date(q.year + (1 if q.month >= 10 else 0), (q.month + 2) % 12 + 1, 1)
+    pos = {}
+    for lane, items in lanes:
+        out.append(f'<rect class="lane" x="0" y="{y0}" width="{W}" height="{laneh - 4}" rx="3"/>'
+                   f'<text class="lane-t" x="8" y="{y0 + 13}">{escape(lane)}</text>')
+        y0 += laneh
+        for it in items:
+            yy = y0 + 4
+            x0, x1 = x(it['start']), x(it['end'])
+            out.append(f'<text class="ax g-label" x="{L - 8}" y="{yy + 13}" text-anchor="end">{escape(it["name"][:22])}</text>')
+            out.append(f'<rect class="rm {it.get("cls", "")}" x="{x0:.1f}" y="{yy}" width="{max(3, x1 - x0):.1f}" height="16" rx="4">'
+                       f'<title>{escape(it.get("tip") or it["name"])}</title></rect>')
+            if it.get('fc_end') and it['fc_end'] > it['end']:
+                x2 = x(it['fc_end'])
+                out.append(f'<rect class="rm-slip" x="{x1:.1f}" y="{yy + 3}" width="{max(2, x2 - x1):.1f}" height="10" rx="3">'
+                           f'<title>Forecast release {it["fc_end"]:%b %Y}: {round((it["fc_end"] - it["end"]).days / 30.4)} months late</title></rect>')
+                x1 = x2
+            for d, lab, st in it.get('gates', []):
+                if not (start <= d <= end):
+                    continue
+                gx = x(d)
+                out.append(f'<path class="gate {st}" d="M{gx:.1f} {yy + 1} l6 7 -6 7 -6 -7z"><title>{escape(lab)} · {d:%d %b %Y} · {st}</title></path>')
+            pos[it['id']] = (x1, yy + 8)
+            y0 += rowh
+    for a, b, ok in deps or []:
+        if a in pos and b in pos:
+            (xa, ya), (xb, yb) = pos[a], pos[b]
+            mid = (xa + xb) / 2
+            out.append(f'<path class="dep {"ok" if ok else "bad"}" d="M{xa:.1f} {ya:.1f} C{mid:.1f} {ya:.1f} {mid:.1f} {yb:.1f} {xb:.1f} {yb:.1f}"/>')
+    for d, label, cls in (today or []):
+        if start <= d <= end:
+            xx = x(d)
+            out.append(f'<line class="{cls}" x1="{xx:.1f}" x2="{xx:.1f}" y1="{T - 8}" y2="{H - 6}"/>'
+                       f'<text class="ax {cls}-t" x="{xx + 3:.1f}" y="{H - 2}">{escape(label)}</text>')
+    out.append('</svg>')
+    return '<figure class="fig wide">' + ''.join(out) + '</figure>'
+
+
+def bubble(points, xlabel, ylabel, height=300, xmax=None, ymax=None, quad=None):
+    """points: [{'label', 'x', 'y', 'r' (size value), 'cls'}]. quad: (x split, y split, [tl, tr, bl, br] labels)."""
+    import math
+    W, H, L, R, T, B = 760, height, 56, 16, 16, 40
+    xs = [p['x'] for p in points] or [1]
+    ys = [p['y'] for p in points] or [1]
+    xm = xmax or _nice_max(max(xs) * 1.1)
+    ym = ymax or _nice_max(max(ys) * 1.1)
+    rm = max([p['r'] for p in points] + [1])
+    X = lambda v: L + (W - L - R) * v / xm
+    Y = lambda v: T + (H - T - B) * (1 - v / ym)
+    out = [f'<svg class="chart bubble" viewBox="0 0 {W} {H}" role="img" aria-label="{escape(ylabel)} by {escape(xlabel)}">']
+    for t in (0, .25, .5, .75, 1):
+        out.append(f'<line class="grid" x1="{L}" x2="{W - R}" y1="{Y(ym * t):.1f}" y2="{Y(ym * t):.1f}"/>'
+                   f'<text class="ax" x="{L - 6}" y="{Y(ym * t) + 4:.1f}" text-anchor="end">{_fmt(ym * t)}</text>'
+                   f'<text class="ax" x="{X(xm * t):.1f}" y="{H - 22}" text-anchor="middle">{_fmt(xm * t)}</text>')
+    if quad:
+        qx, qy, labs = quad
+        out.append(f'<line class="quad" x1="{X(qx):.1f}" x2="{X(qx):.1f}" y1="{T}" y2="{H - B}"/>'
+                   f'<line class="quad" x1="{L}" x2="{W - R}" y1="{Y(qy):.1f}" y2="{Y(qy):.1f}"/>')
+        for (tx, ty, anc), lab in zip(((L + 6, T + 12, 'start'), (W - R - 6, T + 12, 'end'), (L + 6, H - B - 6, 'start'),
+                                        (W - R - 6, H - B - 6, 'end')), labs):
+            out.append(f'<text class="quad-t" x="{tx}" y="{ty}" text-anchor="{anc}">{escape(lab)}</text>')
+    out.append(f'<text class="ax" x="{(L + W - R) / 2:.0f}" y="{H - 4}" text-anchor="middle">{escape(xlabel)}</text>'
+               f'<text class="ax" x="12" y="{(T + H - B) / 2:.0f}" transform="rotate(-90 12 {(T + H - B) / 2:.0f})" text-anchor="middle">{escape(ylabel)}</text>')
+    for p in sorted(points, key=lambda p: -p['r']):
+        r = 5 + 20 * math.sqrt(max(p['r'], 0) / rm)
+        cx, cy = X(min(p['x'], xm)), Y(min(p['y'], ym))
+        out.append(f'<circle class="bub {p.get("cls", "")}" cx="{cx:.1f}" cy="{cy:.1f}" r="{r:.1f}"><title>{escape(p.get("tip") or p["label"])}</title></circle>'
+                   f'<text class="bub-t" x="{cx:.1f}" y="{cy + 3:.1f}" text-anchor="middle">{escape(p["label"])}</text>')
     out.append('</svg>')
     return '<figure class="fig">' + ''.join(out) + '</figure>'

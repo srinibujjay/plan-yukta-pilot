@@ -31,6 +31,14 @@ The demo data is synthetic: products (ORION, VEGA, LYRA, ATLAS, NOVA), vendors (
 | Vendors, customers & quality | Vendor QBR & Issues | OSAT ranking on quality, delivery, cost, capacity, responsiveness; QBR agenda and Excel pack; 8D issues log |
 | | Customer Rating | How reliably each customer takes agreed orders; commit policy; risk-adjusted open orders |
 | | Post-Silicon Analysis | Lot yield control chart, failure signatures, tester outliers, fail-bin Pareto, bin split; push results by API; feed yields into the plan |
+| Portfolio & roadmaps | Portfolio Overview | Executive summary, investment by BU and category, value vs priority, capacity heatmap, portfolio health |
+| | ↳ Roadmap | Swimlane roadmap with gates, slips and dependencies; roadmap vs Jira; roadmap to silicon (links to the supply plan) |
+| | ↳ Resource Capacity | Engineering FTE by skill pool vs project demand, hires and attrition, capacity asks |
+| | ↳ Prioritisation & Funding | Value-based score and a capacity-driven funding line with earliest start per proposal |
+| | ↳ Scenario Planner | Delay, stop, fund, scale demand, add FTE; compare with baseline; save scenarios |
+| | ↳ Portfolio Board & Gates | Gate recommendations, decisions, decision log, board pack (Excel, Confluence) |
+| | ↳ RAID & Dependencies | Risk heatmap, RAID log, dependency checks |
+| | ↳ Jira & Confluence | Pull epic status from Jira Cloud, publish the board pack to Confluence Cloud |
 | Analytics & monitoring | Plan vs Actual | Attainment, OEE, reliability score, recovery actions |
 | | Inventory Health | WIP and FG at standard cost, days of supply, excess, date-code aging and obsolete risk |
 | | Snapshot Comparison | Save the plan, change data, see what moved |
@@ -38,7 +46,7 @@ The demo data is synthetic: products (ORION, VEGA, LYRA, ATLAS, NOVA), vendors (
 | | Profit & Loss | Revenue, COGS and margin by product and customer; lost revenue |
 | | OSAT WIP Snapshot | Vendor codes mapped to SKUs and steps; holds you can release |
 | | Lot-level WIP Audit | Upload raw fab and OSAT reports to de-duplicate rows and measure lead times |
-| Data & setup | Data Tables | 33 editable tables, CSV/Excel upload and download per table |
+| Data & setup | Data Tables | 44 editable tables, CSV/Excel upload and download per table |
 | | SKU Setup Wizard | Clone a product into every table in one step |
 | | Data Checks | Problems that change or stop the plan |
 | | Import / Export | Whole workspace as one Excel workbook, up and down |
@@ -54,6 +62,8 @@ Every formula is in [CALCULATIONS.md](CALCULATIONS.md), also shown in the app un
 | `plan_yukta/demo_data.py` | The synthetic demo dataset |
 | `plan_yukta/cockpit.py` | Planning engine: backward pass, tester allocation, fab, FG, and every module's results |
 | `plan_yukta/insights.py` | Vendor QBR scorecard, customer rating, post-silicon analysis, inventory health |
+| `plan_yukta/portfolio.py`, `pf_views.py`, `portfolio_demo.py` | Portfolio engine, pages and demo portfolio |
+| `plan_yukta/integrations.py` | Jira and Confluence Cloud connectors and the board pack |
 | `plan_yukta/views.py` | Page builders (KPIs, charts, month grids, tables) |
 | `plan_yukta/charts.py` | Server-rendered SVG charts |
 | `plan_yukta/modules.py` | Sidebar, module descriptions, demo tour |
@@ -75,6 +85,6 @@ python app.py            # http://127.0.0.1:5000
 
 ## Deploy on Render
 
-`render.yaml` is a Blueprint. Every push to `main` redeploys. Set `PILOT_ACCESS` to `name:code` pairs for invited testers (empty = open). Optional: `FEEDBACK_URL`, `ANTHROPIC_API_KEY`.
+`render.yaml` is a Blueprint. Every push to `main` redeploys. Set `PILOT_ACCESS` to `name:code` pairs for invited testers (empty = open). Optional: `FEEDBACK_URL`, `ANTHROPIC_API_KEY`, and for a permanent Atlassian connection `ATLASSIAN_SITE`, `ATLASSIAN_EMAIL`, `ATLASSIAN_TOKEN`, `CONFLUENCE_SPACE`, `JIRA_EPIC_JQL`.
 
 Workspaces are small JSON files in `/tmp` (one per browser session, deleted after 24 hours). On Render's free instance they also disappear when the service restarts; testers keep their work by downloading the workspace from Import / Export.

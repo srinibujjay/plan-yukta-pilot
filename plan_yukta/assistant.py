@@ -57,6 +57,15 @@ FAQ = [
      '(100% of the cap), -0.05 moderate (63%, may use non-consignee testers), -0.02 conservative (40%), 0 neutral (25%, own testers '
      'only), positive = avoid. Pull-in Setup has sliders with a live preview of total gap, pull-in production, forecast '
      'achievement and build-ahead stock. The Module 1 Dashboard shows root cause and a monthly recovery plan.'),
+    ('Portfolio, roadmap and resource capacity',
+     'The Portfolio & roadmaps section plans engineering projects: a swimlane roadmap with gates and dependencies, resource '
+     'capacity by skill pool (FTE demand vs headcount and target utilisation), a value-based priority score, and a funding line '
+     'that fits proposed projects into capacity at their earliest possible start. The Scenario Planner tests delays, stops, '
+     'funding, demand changes and extra FTE; the Portfolio Board page recommends gate decisions and produces the board pack.'),
+    ('Jira and Confluence',
+     'Jira & Confluence connects an Atlassian Cloud site with an email and API token. It reads epics and child-issue counts from '
+     'Jira (read-only) and compares due dates with the roadmap, and publishes the Portfolio Board pack as a Confluence page. '
+     'Without credentials it uses demo epic rows.'),
     ('Vendor QBR scorecard and issues log',
      'Vendor QBR & Issues ranks each OSAT 0-100 on quality (test yield vs plan and reported quality), delivery (delivered vs '
      'frozen plan), cost (price index against the lowest quote), capacity (forward test load made on time) and responsiveness '

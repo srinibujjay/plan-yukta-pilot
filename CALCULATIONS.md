@@ -205,9 +205,25 @@ Open orders (Customer orders not cancelled, from the plan start) at risk = open 
 - **Excess** = FG + WIP FG-equivalent − demand over (Excess threshold weeks + the product's total cycle time); valued at finished-goods standard cost first, then at the WIP average.
 - **Aging** from the YYWW date code (ISO week): 0–3, 3–6, 6–12, 12+ months, and obsolete risk above Obsolete age months.
 
-## 20. Data checks
+## 21. Portfolio and roadmaps
 
-Errors and warnings that change or stop the plan: products without a flow or without qualified OSATs, test times without testers, bin fractions that do not add up to 1, unmapped WIP lots, missing prices, cross-flow rules over 100%, references to unknown products or vendors, test results that pass more than they test, closed issues without dates, NPI milestones past their readout without a status, and QBR weights that do not add up to 100.
+Monthly buckets from the plan start for "Portfolio horizon months"; quarters follow "Portfolio quarter start month".
+
+- **Capacity**: headcount[pool, m] = FTE + Σ capacity changes from their month. Demand[pool, m] = Σ project FTE whose From ≤ m ≤ To. Utilisation = demand ÷ headcount; target capacity = headcount × target utilisation.
+- **Investment**: FTE-years = Σ FTE × months ÷ 12 over each demand row; cost = FTE-years × pool cost per FTE-year.
+- **Priority score**: criteria on 1-5 — value scaled across live projects (1 + 4 × (v − min) ÷ (max − min)), strategic fit, customer demand, time criticality, and 6 − technical risk. Score = Σ criterion × weight ÷ Σ weights × 20.
+- **Funding line**: committed projects load capacity first. Proposed projects in score order are tried at start shifts of 0-12 months; the first shift where every pool-month stays at or below target capacity is kept ("Fits now" or "Fits if k months later") and its demand is added; otherwise "Above the line".
+- **Forecast release** = G5 Release forecast (or planned) date. **Dependency margin** = To's forecast release − (From's forecast release + lag); below 0 = conflict.
+- **Health** (worst of four): Schedule red if any open gate forecast slips more than 2 months or is overdue, amber for any slip; Capacity red if the project draws on a pool more than 5% over target in 4+ months, amber 1+; Risk red for an open RAID item with P×I ≥ 15, amber ≥ 9; Dependencies red on a conflict.
+- **Capacity ask** per quarter and pool = max over its months of (demand − target capacity), costed at the pool cost ÷ 4.
+- **Gate recommendation**: no readiness = assess first; Approve when readiness ≥ 85% and no open issue (capacity counts only for G1 and G2 of proposed projects; high risk; dependency conflict); Approve with conditions at ≥ 70%; otherwise Defer. Recording a decision sets the gate status (Passed, Conditional, Deferred, Failed), adds a decision-log row, and an approved G1/G2 makes the project Committed.
+- **Scenarios** apply in Seq order: Delay months (dates, open gates and demand), Stop, Fund, Scale demand %, Add FTE (a capacity change from a month).
+- **Roadmap to silicon**: a project's LinkedSKU is checked against NPI Management's qualification date; the need date is the earlier of its own release and (dependent release − lag).
+- **Jira sync**: epics from the JQL plus every project's JiraKey; children by `parent = KEY`, counted by status category. **Confluence**: the board pack is created or updated (next version) as one page in the space.
+
+## 22. Data checks
+
+Errors and warnings that change or stop the plan: products without a flow or without qualified OSATs, test times without testers, bin fractions that do not add up to 1, unmapped WIP lots, missing prices, cross-flow rules over 100%, references to unknown products or vendors, test results that pass more than they test, closed issues without dates, NPI milestones past their readout without a status, QBR weights that do not add up to 100, portfolio rows that name unknown projects or pools, demand rows that end before they start, and projects that launch before they start.
 
 ---
 

@@ -31,6 +31,13 @@ TEST_STEPS = ['Sort', 'Test1', 'Test2']
 YN = ['Y', 'N']
 
 
+PF_BUS = ['Infrastructure', 'Client', 'Automotive', 'IoT', 'Platform']
+PF_CATEGORIES = ['CPU IP', 'GPU IP', 'AI accelerator IP', 'Compute subsystem', 'System IP', 'Security IP', 'Software & tools', 'Silicon & chiplets']
+PF_STAGES = ['Idea', 'Concept', 'Plan', 'Develop', 'Validate', 'Release', 'Sustain', 'Stopped']
+PF_GATES = ['G0 Concept', 'G1 Plan approval', 'G2 Development commit', 'G3 Alpha', 'G4 Beta', 'G5 Release']
+PF_CRITERIA = ['Value', 'Strategic fit', 'Customer demand', 'Time criticality', 'Technical risk']
+
+
 def C(name, typ='text', help='', choices=None, required=True, lo=None, hi=None, readonly=False):
     return {'name': name, 'type': typ, 'help': help, 'choices': choices, 'required': required,
             'lo': lo, 'hi': hi, 'readonly': readonly}
@@ -325,9 +332,106 @@ TABLES = {
                     C('DisruptionDays', 'num', lo=0, hi=31),
                     C('Disruption', 'choice', choices=['None', 'Tester down', 'Material shortage', 'Yield excursion', 'Hold', 'Logistics'])],
     },
+    # ---------------------------------------------------------------- portfolio and roadmaps
+    'pf_projects': {
+        'title': 'Portfolio projects', 'group': 'Portfolio', 'key': ['ProjectID'],
+        'about': 'Every product, platform and enabler on the roadmap: business unit, category, lifecycle stage, dates, '
+                 'funding state and the value inputs used for prioritisation.',
+        'used_by': ['Portfolio Overview', 'Roadmap', 'Prioritisation & Funding', 'Scenario Planner'],
+        'columns': [C('ProjectID'), C('Name', help='Codename.'),
+                    C('BU', 'choice', choices=PF_BUS), C('Category', 'choice', choices=PF_CATEGORIES),
+                    C('Stage', 'choice', choices=PF_STAGES), C('Funding', 'choice', choices=['Committed', 'Proposed', 'Stopped'],
+                                                              help='Committed projects always get capacity; Proposed ones compete for it.'),
+                    C('Start', 'month'), C('Launch', 'month', help='Target release (G5).'),
+                    C('Owner', required=False), C('Confidence', 'choice', choices=['High', 'Medium', 'Low']),
+                    C('ValueUSDm', 'num', 'Lifetime value: royalty and licence NPV, $M.', lo=0, hi=100000),
+                    C('StrategicFit', 'int', '1-5', lo=1, hi=5), C('CustomerDemand', 'int', '1-5', lo=1, hi=5),
+                    C('TimeCriticality', 'int', '1-5: cost of delay.', lo=1, hi=5), C('TechRisk', 'int', '1-5: higher = riskier.', lo=1, hi=5),
+                    C('JiraKey', help='Jira epic for this project (for sync).', required=False),
+                    C('LinkedSKU', help='Product in the supply plan, if the project becomes silicon.', required=False),
+                    C('Notes', required=False)],
+    },
+    'pf_gates': {
+        'title': 'Lifecycle gates', 'group': 'Portfolio', 'key': ['ProjectID', 'Gate'],
+        'about': 'Approval and readiness gates per project, with planned and forecast dates, status and readiness score.',
+        'used_by': ['Roadmap', 'Portfolio Board & Gates'],
+        'columns': [C('ProjectID'), C('Gate', 'choice', choices=PF_GATES), C('Planned', 'date'),
+                    C('Forecast', 'date', 'Latest expected date; blank = on plan.', required=False),
+                    C('Status', 'choice', choices=['Planned', 'Passed', 'Conditional', 'Deferred', 'Failed']),
+                    C('Readiness', 'num', 'Checklist complete, %.', lo=0, hi=100, required=False),
+                    C('Decided', 'date', required=False), C('Notes', required=False)],
+    },
+    'pf_dependencies': {
+        'title': 'Project dependencies', 'group': 'Portfolio', 'key': ['From', 'To'],
+        'about': 'To needs From first: the dependent project should not reach its launch before From launches plus the lag.',
+        'used_by': ['Roadmap', 'RAID & Dependencies'],
+        'columns': [C('From', help='Project that delivers.'), C('To', help='Project that needs it.'),
+                    C('Type', 'choice', choices=['IP delivery', 'Platform', 'Shared team', 'Silicon validation', 'Software enablement']),
+                    C('LagMonths', 'int', 'Months between From launch and To launch.', lo=-24, hi=36), C('Note', required=False)],
+    },
+    'pf_pools': {
+        'title': 'Skill pools', 'group': 'Portfolio', 'key': ['Pool'],
+        'about': 'Engineering capacity by skill pool: full-time equivalents today and the utilisation you plan to.',
+        'used_by': ['Resource Capacity', 'Prioritisation & Funding'],
+        'columns': [C('Pool'), C('FTE', 'num', 'Engineers today.', lo=0, hi=100000), C('TargetUtilPct', 'num', lo=10, hi=120),
+                    C('CostPerFTEk', 'num', 'Loaded cost per FTE-year, $k.', lo=0, hi=10000), C('Site', required=False)],
+    },
+    'pf_capacity_changes': {
+        'title': 'Capacity changes', 'group': 'Portfolio', 'key': ['Pool', 'Month', 'Reason'],
+        'about': 'Planned hires, contractors, transfers and attrition: FTE added (or removed) from a month onward.',
+        'used_by': ['Resource Capacity'],
+        'columns': [C('Pool'), C('Month', 'month'), C('DeltaFTE', 'num', lo=-10000, hi=10000),
+                    C('Reason', 'choice', choices=['Hiring plan', 'Contractors', 'Transfer', 'Attrition', 'Partner'])],
+    },
+    'pf_demand': {
+        'title': 'Resource demand', 'group': 'Portfolio', 'key': ['ProjectID', 'Pool', 'From'],
+        'about': 'FTE each project needs from each pool, month by month between From and To.',
+        'used_by': ['Resource Capacity', 'Prioritisation & Funding', 'Scenario Planner'],
+        'columns': [C('ProjectID'), C('Pool'), C('From', 'month'), C('To', 'month'), C('FTE', 'num', lo=0, hi=10000)],
+    },
+    'pf_value_weights': {
+        'title': 'Prioritisation weights', 'group': 'Portfolio', 'key': ['Criterion'],
+        'about': 'Value-based prioritisation: weight of each criterion in the priority score.',
+        'used_by': ['Prioritisation & Funding'],
+        'columns': [C('Criterion', 'choice', choices=PF_CRITERIA), C('WeightPct', 'num', lo=0, hi=100), C('Notes', required=False)],
+    },
+    'pf_risks': {
+        'title': 'RAID log', 'group': 'Portfolio', 'key': ['RiskID'],
+        'about': 'Risks, assumptions, issues and dependencies raised against projects, scored by probability and impact.',
+        'used_by': ['RAID & Dependencies', 'Portfolio Overview'],
+        'columns': [C('RiskID'), C('ProjectID'), C('Type', 'choice', choices=['Risk', 'Assumption', 'Issue', 'Dependency']),
+                    C('Title'), C('Probability', 'int', '1-5', lo=1, hi=5), C('Impact', 'int', '1-5', lo=1, hi=5),
+                    C('Owner', required=False), C('Mitigation', required=False), C('Due', 'date', required=False),
+                    C('Status', 'choice', choices=['Open', 'Mitigating', 'Closed'])],
+    },
+    'pf_decisions': {
+        'title': 'Decision log', 'group': 'Portfolio', 'key': ['DecisionID'],
+        'about': 'Decisions from the Portfolio Board and BU reviews, with conditions and actions.',
+        'used_by': ['Portfolio Board & Gates'],
+        'columns': [C('DecisionID'), C('Date', 'date'), C('Forum', 'choice', choices=['Portfolio Board', 'BU review', 'Exec staff']),
+                    C('ProjectID'), C('Gate', 'choice', choices=PF_GATES + ['-'], required=False),
+                    C('Decision', 'choice', choices=['Approve', 'Approve with conditions', 'Defer', 'Re-scope', 'Stop']),
+                    C('Summary'), C('Owner', required=False), C('ActionDue', 'date', required=False)],
+    },
+    'pf_scenarios': {
+        'title': 'Scenarios', 'group': 'Portfolio', 'key': ['Scenario', 'Seq'],
+        'about': 'Named what-if scenarios. Each row changes one thing: delay a project, stop it, fund it, scale its demand, or add pool capacity.',
+        'used_by': ['Scenario Planner'],
+        'columns': [C('Scenario'), C('Seq', 'int', lo=1, hi=999),
+                    C('Change', 'choice', choices=['Delay months', 'Stop', 'Fund', 'Scale demand %', 'Add FTE']),
+                    C('ProjectID', required=False), C('Pool', required=False), C('Month', 'month', required=False),
+                    C('Value', 'num', lo=-10000, hi=10000, required=False), C('Note', required=False)],
+    },
+    'pf_jira': {
+        'title': 'Jira epic status', 'group': 'Portfolio', 'key': ['JiraKey'],
+        'about': 'Epic status from Jira, filled by the Jira sync (demo rows until you connect your site).',
+        'used_by': ['Jira & Confluence', 'Roadmap'],
+        'columns': [C('JiraKey'), C('Summary', required=False), C('Status', required=False), C('DueDate', 'date', required=False),
+                    C('Done', 'int', lo=0), C('InProgress', 'int', lo=0), C('Total', 'int', lo=0), C('Synced', required=False)],
+    },
 }
 
-GROUPS = ['Master data', 'Demand', 'Capacity', 'Inventory', 'Procurement', 'Monitoring', 'Vendors & customers', 'Test data']
+GROUPS = ['Master data', 'Demand', 'Capacity', 'Inventory', 'Procurement', 'Monitoring', 'Vendors & customers', 'Test data', 'Portfolio']
 
 # Settings: name -> (type, default, notes, lo, hi)
 SETTINGS = {
@@ -360,6 +464,8 @@ SETTINGS = {
     'Excess threshold weeks': ('num', 13, 'Inventory Health: stock above this many weeks of demand is excess.', 1, 104),
     'Obsolete age months': ('int', 18, 'Inventory Health: date codes older than this are obsolete risk.', 1, 120),
     'SPC sigma': ('num', 3, 'Post-Silicon: control limits at mean ± this many standard deviations.', 1, 6),
+    'Portfolio horizon months': ('int', 24, 'Portfolio: months of resource capacity planned from the plan start.', 6, 48),
+    'Portfolio quarter start month': ('int', 1, 'Portfolio: first month of the fiscal year (1 = January).', 1, 12),
     'Capacity buffer %': ('num', 15, 'Tester Capacity: headroom you want above the plan.', 0, 100),
 }
 

@@ -11,6 +11,7 @@ Render:  gunicorn app:app (see render.yaml)
 from __future__ import annotations
 
 import hmac
+import re
 import io
 import json
 import logging
@@ -24,7 +25,7 @@ import markdown
 from flask import (Flask, Response, abort, jsonify, redirect, render_template, request, send_file,
                    send_from_directory, session, url_for)
 
-from plan_yukta import assistant, cockpit, exports, modules, views
+from plan_yukta import assistant, cockpit, exports, modules, views, pf_views, integrations as IG
 from plan_yukta import workspace as W
 
 HERE = Path(__file__).parent
@@ -219,6 +220,10 @@ BUILDERS = {
     'm1-dashboard': views.m1_dashboard, 'flow-dashboard': views.flow_dashboard,
     'vendor-qbr': views.vendor_qbr, 'customers': views.customers, 'inventory': views.inventory,
 }
+PF_BUILDERS = {
+    'pf-overview': pf_views.overview, 'pf-roadmap': pf_views.roadmap, 'pf-capacity': pf_views.capacity, 'pf-priority': pf_views.priority,
+    'pf-scenarios': pf_views.scenario, 'pf-board': pf_views.board, 'pf-raid': pf_views.raid, 'pf-integrations': pf_views.integrations,
+}
 
 
 @app.get('/')
@@ -234,6 +239,8 @@ def module_page(key):
     R = results(wsid, ws)
     if key in BUILDERS:
         return render_page(key, BUILDERS[key](R, request.args), R, ws)
+    if key in PF_BUILDERS:
+        return render_page(key, PF_BUILDERS[key](R, request.args, ws), R, ws)
     if key == 'postsilicon':
         return render_page(key, views.postsilicon(R, request.args, token=api_token(wsid), base_url=request.host_url), R, ws)
     if key == 'overrides':
@@ -915,6 +922,139 @@ def api_test_results():
     return jsonify(out), (200 if not out['errors'] else 422)
 
 
+# ------------------------------------------------------------------ portfolio & roadmaps
+def _pf_back(key, **kw):
+    return redirect(url_for('module_page', key=key, **kw))
+
+
+@app.post('/pf/scenario/save')
+def pf_scenario_save():
+    from plan_yukta import portfolio as PFm
+    wsid, ws = ws_get()
+    name = (request.form.get('name') or '').strip()[:60]
+    if not name:
+        return _pf_back('pf-scenarios', err='Give the scenario a name.')
+    _, changes = pf_views._scenario_arg(ws, request.form)
+    if not changes:
+        return _pf_back('pf-scenarios', err='Nothing to save: build a what-if first.')
+    rows = [r for r in ws['tables'].get('pf_scenarios', []) if r['Scenario'] != name]
+    cols = [c['name'] for c in W.TABLES['pf_scenarios']['columns']]
+    for i, c in enumerate(sorted(changes, key=lambda c: c.get('Seq') or 0), start=1):
+        rows.append({k: ({'Scenario': name, 'Seq': i}.get(k, c.get(k))) for k in cols})
+    clean, errors = W.validate_rows('pf_scenarios', rows)
+    if errors:
+        return _pf_back('pf-scenarios', err=f'{errors[0][1]}: {errors[0][2]}.')
+    ws['tables']['pf_scenarios'] = clean
+    _mark_edited(ws, 'pf_scenarios')
+    W.save(wsid, ws)
+    return _pf_back('pf-scenarios', scenario=name, msg=f'Scenario "{name}" saved with {len(changes)} change(s).')
+
+
+@app.post('/pf/gate/decide')
+def pf_gate_decide():
+    wsid, ws = ws_get()
+    f = request.form
+    pid, gate, dec = f.get('pid'), f.get('gate'), f.get('decision')
+    g = next((r for r in ws['tables'].get('pf_gates', []) if r['ProjectID'] == pid and r['Gate'] == gate), None)
+    if not g or dec not in ('Approve', 'Approve with conditions', 'Defer', 'Re-scope', 'Stop'):
+        return _pf_back('pf-board', err='That gate is no longer in the table.')
+    as_of = str(W.settings_dict(ws).get('As-of date'))[:10]
+    g['Status'] = {'Approve': 'Passed', 'Approve with conditions': 'Conditional', 'Defer': 'Deferred', 'Re-scope': 'Deferred', 'Stop': 'Failed'}[dec]
+    g['Decided'] = as_of
+    decs = ws['tables'].get('pf_decisions', [])
+    nums = [int(d['DecisionID'][2:]) for d in decs if str(d.get('DecisionID', '')).startswith('D-') and d['DecisionID'][2:].isdigit()]
+    summary = (f.get('summary') or '').strip()[:200] or f'{gate}: {dec.lower()}.'
+    decs.append({'DecisionID': f'D-{(max(nums) + 1) if nums else 101}', 'Date': as_of, 'Forum': 'Portfolio Board', 'ProjectID': pid, 'Gate': gate,
+                 'Decision': dec, 'Summary': summary, 'Owner': None, 'ActionDue': None})
+    if dec == 'Stop':
+        for p in ws['tables'].get('pf_projects', []):
+            if p['ProjectID'] == pid:
+                p['Funding'], p['Stage'] = 'Stopped', 'Stopped'
+    elif dec in ('Approve', 'Approve with conditions') and gate in ('G1 Plan approval', 'G2 Development commit'):
+        for p in ws['tables'].get('pf_projects', []):
+            if p['ProjectID'] == pid:
+                p['Funding'] = 'Committed'
+                p['Stage'] = {'G1 Plan approval': 'Plan', 'G2 Development commit': 'Develop'}[gate] if p['Stage'] in ('Idea', 'Concept', 'Plan') else p['Stage']
+    for t in ('pf_gates', 'pf_decisions', 'pf_projects'):
+        clean, errors = W.validate_rows(t, ws['tables'][t])
+        if errors:
+            return _pf_back('pf-board', err=f'{errors[0][1]}: {errors[0][2]}.')
+        ws['tables'][t] = clean
+        _mark_edited(ws, t)
+    W.save(wsid, ws)
+    return _pf_back('pf-board', msg=f'Recorded: {dec} for {pid} {gate}. Gate status, decision log and funding updated.')
+
+
+@app.post('/pf/integrations/save')
+def pf_integrations_save():
+    wsid, ws = ws_get()
+    f = request.form
+    cur = dict(ws.get('integrations') or {})
+    try:
+        cur['site'] = IG.clean_site(f.get('site'))
+    except IG.IntegrationError as e:
+        return _pf_back('pf-integrations', err=str(e))
+    cur['email'] = (f.get('email') or '').strip()[:120]
+    if (f.get('token') or '').strip():
+        cur['token'] = f['token'].strip()[:300]
+    cur['jql'] = (f.get('jql') or '').strip()[:300] or IG.DEFAULT_JQL
+    cur['space'] = re.sub(r'[^A-Za-z0-9_~-]', '', f.get('space') or '')[:40]
+    ws['integrations'] = cur
+    W.save(wsid, ws)
+    return _pf_back('pf-integrations', msg='Saved. Press Test connection.')
+
+
+@app.post('/pf/integrations/clear')
+def pf_integrations_clear():
+    wsid, ws = ws_get()
+    ws.pop('integrations', None)
+    W.save(wsid, ws)
+    return _pf_back('pf-integrations', msg='Credentials removed from this workspace.')
+
+
+@app.post('/pf/integrations/test')
+def pf_integrations_test():
+    wsid, ws = ws_get()
+    try:
+        return _pf_back('pf-integrations', msg=IG.test(IG.config(ws)))
+    except IG.IntegrationError as e:
+        return _pf_back('pf-integrations', err=str(e))
+
+
+@app.post('/pf/jira/sync')
+def pf_jira_sync():
+    wsid, ws = ws_get()
+    keys = {p['JiraKey'] for p in ws['tables'].get('pf_projects', []) if p.get('JiraKey')}
+    try:
+        rows = IG.jira_sync(IG.config(ws), keys)
+    except IG.IntegrationError as e:
+        return _pf_back('pf-integrations', err=str(e))
+    clean, errors = W.validate_rows('pf_jira', rows)
+    if errors:
+        return _pf_back('pf-integrations', err=f'Jira data did not validate: {errors[0][1]}: {errors[0][2]}.')
+    ws['tables']['pf_jira'] = clean
+    _mark_edited(ws, 'pf_jira')
+    W.save(wsid, ws)
+    app.logger.info('PILOT jira sync epics=%s', len(clean))
+    return _pf_back('pf-integrations', msg=f'Synced {len(clean)} epics from Jira.')
+
+
+@app.post('/pf/confluence/publish')
+def pf_confluence_publish():
+    wsid, ws = ws_get()
+    R = results(wsid, ws)
+    cfg = IG.config(ws)
+    if not IG.status(cfg)['conf_ready']:
+        return _pf_back('pf-integrations', err='Connect your Atlassian site and add a Confluence space key to publish. '
+                                               'Meanwhile, download the board pack from Portfolio Board & Gates.')
+    pk = IG.board_pack(ws, R)
+    try:
+        action, link = IG.confluence_publish(cfg, 'Portfolio Board pack (Plan Yukta)', IG.storage_html(pk))
+    except IG.IntegrationError as e:
+        return _pf_back('pf-integrations', err=str(e))
+    return _pf_back('pf-integrations', msg=f'Confluence page {action}: {link}')
+
+
 # ------------------------------------------------------------------ exports
 def _download(data, name, mime):
     return send_file(io.BytesIO(data), as_attachment=True, download_name=name, mimetype=mime)
@@ -927,6 +1067,8 @@ XLSX = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
 def export(name):
     wsid, ws = ws_get()
     R = results(wsid, ws)
+    if name == 'board-pack.xlsx':
+        return _download(exports.board_pack_workbook(ws, R), 'PlanYukta_Portfolio_Board_Pack.xlsx', XLSX)
     if name.startswith('qbr-') and name.endswith('.xlsx'):
         v = name[4:-5]
         if v not in R['plan'].vendors:

@@ -24,6 +24,7 @@
     {% for r in (s.rows[:s.limit] if s.limit else s.rows) %}<tr>
       {% for c in s.cols %}{% set v = r[c.key] %}
         {% if c.fmt == 'badge' %}<td><span class="badge {{ r[c.tone] if c.tone and r[c.tone] in ('ok','warn','bad','info') else tone_of(r[c.tone] if c.tone else v) }}">{{ v }}</span></td>
+        {% elif c.fmt == 'raw' %}<td class="{{ c.align }}" data-v="{{ r[c.key + '_sort'] if r[c.key + '_sort'] is defined else '' }}">{{ v|safe if v is not none else '' }}</td>
         {% elif c.fmt == 'link' %}<td>{% if r.link %}<a href="{{ r.link }}">{{ v }}</a>{% else %}{{ v }}{% endif %}</td>
         {% else %}<td class="{{ c.align }}{{ ' wrap' if c.key in ('text', 'action', 'message', 'what', 'HoldReason') }}" data-v="{{ v if v is not none else '' }}">{{ v|fmt(c.fmt) }}</td>{% endif %}
       {% endfor %}

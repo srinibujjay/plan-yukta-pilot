@@ -379,6 +379,8 @@ def build() -> dict:
     ]
     t['order_history'] = _order_history()
     t['test_results'], t['test_bins'] = _test_data()
+    from .portfolio_demo import build as _portfolio
+    t.update(_portfolio())
     return t
 
 

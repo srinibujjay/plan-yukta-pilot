@@ -1702,6 +1702,26 @@ def checks_view(p: Plan):
             out.append(('warning', 'vendor_issues', f'Issue {r["IssueID"]} is Closed without a Closed date; it does not count toward days to close.'))
         if r.get('Closed') and r.get('Opened') and str(r['Closed']) < str(r['Opened']):
             out.append(('error', 'vendor_issues', f'Issue {r["IssueID"]} is closed before it was opened.'))
+    pids = {r['ProjectID'] for r in t.get('pf_projects', [])}
+    pools = {r['Pool'] for r in t.get('pf_pools', [])}
+    for name, cols in (('pf_demand', ['ProjectID']), ('pf_gates', ['ProjectID']), ('pf_risks', ['ProjectID']),
+                       ('pf_decisions', ['ProjectID']), ('pf_dependencies', ['From', 'To'])):
+        bad = sorted({r[c] for r in t.get(name, []) for c in cols if r.get(c) and r[c] not in pids})
+        if bad:
+            out.append(('warning', name, f'{TABLES[name]["title"]} mentions projects not in Portfolio projects: {", ".join(bad[:6])}; those rows are ignored.'))
+    badp = sorted({r['Pool'] for r in t.get('pf_demand', []) + t.get('pf_capacity_changes', []) if r['Pool'] not in pools})
+    if badp:
+        out.append(('warning', 'pf_demand', f'Resource demand or capacity changes use pools not in Skill pools: {", ".join(badp[:6])}; ignored.'))
+    rev = [r for r in t.get('pf_demand', []) if r['To'] < r['From']]
+    if rev:
+        out.append(('error', 'pf_demand', f'{len(rev)} resource demand rows end before they start (e.g. {rev[0]["ProjectID"]} {rev[0]["Pool"]}).'))
+    nodem = sorted(p['Name'] for p in t.get('pf_projects', []) if p['Funding'] != 'Stopped'
+                   and not any(d['ProjectID'] == p['ProjectID'] for d in t.get('pf_demand', [])))
+    if nodem:
+        out.append(('info', 'pf_demand', f'Projects with no resource demand (they cost no capacity): {", ".join(nodem[:6])}.'))
+    for r in t.get('pf_projects', []):
+        if r['Launch'] < r['Start']:
+            out.append(('error', 'pf_projects', f'{r["Name"]} launches before it starts.'))
     wsum = sum(float(r['WeightPct']) for r in t.get('qbr_weights', []))
     if t.get('qbr_weights') and abs(wsum - 100) > 0.5:
         out.append(('info', 'qbr_weights', f'QBR weights add up to {wsum:.0f}%; scores are weighted in proportion.'))
