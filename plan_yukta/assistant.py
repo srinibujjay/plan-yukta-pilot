@@ -62,6 +62,15 @@ FAQ = [
      'capacity by skill pool (FTE demand vs headcount and target utilisation), a value-based priority score, and a funding line '
      'that fits proposed projects into capacity at their earliest possible start. The Scenario Planner tests delays, stops, '
      'funding, demand changes and extra FTE; the Portfolio Board page recommends gate decisions and produces the board pack.'),
+    ('FTE ramp-up and productivity',
+     'FTE Ramp & Productivity models how new people grow from about 0.5 to 1.0 effective FTE. Each cohort in Capacity changes ramps by its '
+     'type (permanent, contractor, partner, transfer); levers such as onboarding with a buddy, pre-start access or reusable environments '
+     'shorten the ramp or lift output. The plan uses effective FTE. The page gives a month-by-month onboarding plan and a hire-vs-contract '
+     'comparison for the next capacity gap.'),
+    ('Capacity risk management',
+     'Capacity Risk Management lists risks to engineering capacity from the data: attrition drag, hiring lead time, ramp-up timing, '
+     'contractor dependency, site concentration, burnout and key roles without backup, each with a mitigation and date. A stress test '
+     'raises attrition, freezes hiring, removes contractors or a country, and shows which pools and projects break.'),
     ('Jira and Confluence',
      'Jira & Confluence connects an Atlassian Cloud site with an email and API token. It reads epics and child-issue counts from '
      'Jira (read-only) and compares due dates with the roadmap, and publishes the Portfolio Board pack as a Confluence page. '

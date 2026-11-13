@@ -34,6 +34,8 @@ The demo data is synthetic: products (ORION, VEGA, LYRA, ATLAS, NOVA), vendors (
 | Portfolio & roadmaps | Portfolio Overview | Executive summary, investment by BU and category, value vs priority, capacity heatmap, portfolio health |
 | | ↳ Roadmap | Swimlane roadmap with gates, slips and dependencies; roadmap vs Jira; roadmap to silicon (links to the supply plan) |
 | | ↳ Resource Capacity | Engineering FTE by skill pool vs project demand, hires and attrition, capacity asks |
+| | ↳ FTE Ramp & Productivity | New people from about 0.5 to 1.0 FTE: ramp curves, output lost, a month-by-month onboarding plan, productivity levers, hire vs contract |
+| | ↳ Capacity Risk Management | Attrition, hiring lead time, ramp-up, contractor, site and key-person risks; stress tests by attrition, hiring freeze, contractor exit, country loss |
 | | ↳ Prioritisation & Funding | Value-based score and a capacity-driven funding line with earliest start per proposal |
 | | ↳ Scenario Planner | Delay, stop, fund, scale demand, add FTE; compare with baseline; save scenarios |
 | | ↳ Portfolio Board & Gates | Gate recommendations, decisions, decision log, board pack (Excel, Confluence) |
@@ -46,7 +48,7 @@ The demo data is synthetic: products (ORION, VEGA, LYRA, ATLAS, NOVA), vendors (
 | | Profit & Loss | Revenue, COGS and margin by product and customer; lost revenue |
 | | OSAT WIP Snapshot | Vendor codes mapped to SKUs and steps; holds you can release |
 | | Lot-level WIP Audit | Upload raw fab and OSAT reports to de-duplicate rows and measure lead times |
-| Data & setup | Data Tables | 44 editable tables, CSV/Excel upload and download per table |
+| Data & setup | Data Tables | 47 editable tables, CSV/Excel upload and download per table |
 | | SKU Setup Wizard | Clone a product into every table in one step |
 | | Data Checks | Problems that change or stop the plan |
 | | Import / Export | Whole workspace as one Excel workbook, up and down |
@@ -63,6 +65,7 @@ Every formula is in [CALCULATIONS.md](CALCULATIONS.md), also shown in the app un
 | `plan_yukta/cockpit.py` | Planning engine: backward pass, tester allocation, fab, FG, and every module's results |
 | `plan_yukta/insights.py` | Vendor QBR scorecard, customer rating, post-silicon analysis, inventory health |
 | `plan_yukta/portfolio.py`, `pf_views.py`, `portfolio_demo.py` | Portfolio engine, pages and demo portfolio |
+| `plan_yukta/workforce.py` | FTE ramp-up economics, levers, hire vs contract, stress tests, capacity risk register |
 | `plan_yukta/integrations.py` | Jira and Confluence Cloud connectors and the board pack |
 | `plan_yukta/views.py` | Page builders (KPIs, charts, month grids, tables) |
 | `plan_yukta/charts.py` | Server-rendered SVG charts |

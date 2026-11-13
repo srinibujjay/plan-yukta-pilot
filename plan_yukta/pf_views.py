@@ -123,7 +123,8 @@ def _scenario_arg(ws, args):
             pass
     if args.get('a_pool') and args.get('a_fte') and args.get('a_month'):
         try:
-            adhoc.append({'Seq': 2, 'Change': 'Add FTE', 'Pool': args['a_pool'], 'Month': args['a_month'][:7], 'Value': float(args['a_fte'])})
+            adhoc.append({'Seq': 2, 'Change': 'Hire FTE' if args.get('a_type') == 'p' else 'Add FTE', 'Pool': args['a_pool'],
+                          'Month': args['a_month'][:7], 'Value': float(args['a_fte'])})
         except ValueError:
             pass
     for i, (kind, key) in enumerate((('Fund', 'f_pid'), ('Stop', 's_pid')), start=3):
@@ -342,10 +343,10 @@ def capacity(R, args, ws):
                           note='Edit in Capacity changes. Scenario rows of type Add FTE show here as Scenario.'))
     prow = [{'pool': x, 'fte': pf.supply[x][0], 'target': pf.target[x] * 100, 'cost': float(pf.pools[x]['CostPerFTEk']),
              'peak': max(load[x]) if load[x] else 0, 'peak_m': pf.months[load[x].index(max(load[x]))] if load[x] and max(load[x]) > 0 else None,
-             'site': pf.pools[x].get('Site')} for x in pools]
+             'site': pf.pools[x].get('Countries')} for x in pools]
     sections.append(table('Skill pools', [col('pool', 'Pool'), col('fte', 'FTE today', 'num0'), col('target', 'Target util %', 'num0'),
                                           col('peak', 'Peak demand FTE', 'num1'), col('peak_m', 'Peak month', 'month'), col('cost', 'Cost / FTE-year $k', 'num0'),
-                                          col('site', 'Sites')], prow, search=False))
+                                          col('site', 'Countries')], prow, search=False))
     return page('pf-capacity', sections)
 
 
@@ -419,6 +420,8 @@ def scenario(R, args, ws):
             f'<label>Delay project<select name="d_pid"><option value="">–</option>{po}</select></label>'
             f'<label>by months<input type="number" name="d_m" min="-12" max="24" value="{_e(args.get("d_m") or 3)}"></label>'
             f'<label>Add FTE to pool<select name="a_pool"><option value="">–</option>{poo}</select></label>'
+            f'<label>as<select name="a_type"><option value="c" {"selected" if args.get("a_type") != "p" else ""}>Contractors</option>'
+            f'<option value="p" {"selected" if args.get("a_type") == "p" else ""}>Permanent hires</option></select></label>'
             f'<label>FTE<input type="number" name="a_fte" min="-500" max="500" step="1" value="{_e(args.get("a_fte") or 10)}"></label>'
             f'<label>from<input type="month" name="a_month" value="{_e(args.get("a_month") or base.start)}"></label>'
             f'<label>Fund<select name="f_pid"><option value="">–</option>{prop}</select></label>'
@@ -483,7 +486,8 @@ def _describe(c, pf):
     return {'Delay months': f'delay {nm} by {int(v or 0)} months',
             'Stop': f'stop {nm}', 'Fund': f'fund {nm}',
             'Scale demand %': f'scale {nm} demand by {float(v or 0):+.0f}%',
-            'Add FTE': f'add {float(v or 0):+.0f} FTE to {c.get("Pool")} from {mlabel(c["Month"]) if c.get("Month") else "?"}'}.get(c['Change'], c['Change'])
+            'Add FTE': f'add {float(v or 0):+.0f} contractor FTE to {c.get("Pool")} from {mlabel(c["Month"]) if c.get("Month") else "?"}',
+            'Hire FTE': f'hire {float(v or 0):+.0f} permanent FTE in {c.get("Pool")} from {mlabel(c["Month"]) if c.get("Month") else "?"}'}.get(c['Change'], c['Change'])
 
 
 # ------------------------------------------------------------------ portfolio board
@@ -649,3 +653,195 @@ def integrations(R, args, ws, status=None):
                                           col('Total', 'Total', 'int'), col('pct', 'Done %', 'num0'), col('Synced', 'Synced')], rows, search=False,
                           empty='No epics yet: sync from Jira or edit Jira epic status.'))
     return page('pf-integrations', sections)
+
+
+# ------------------------------------------------------------------ FTE ramp-up and productivity
+def fte(R, args, ws):
+    from . import workforce as WF
+    pf = PF.Portfolio(ws)
+    pools = list(pf.pools)
+    if not pools:
+        return page('pf-fte', [callout('Add skill pools first.')])
+    pool = args.get('pool') if args.get('pool') in pools else ('Verification' if 'Verification' in pools else pools[0])
+    imp = WF.lever_impacts(pf)
+    ph = WF.per_hire(pf, pool)
+    perm = next((r for r in ph if r['type'] == 'Permanent hire'), ph[0])
+    new_fte = sum(c['fte'] for c in pf.cohorts if c['fte'] > 0)
+    lost = sum(c['fte'] * c['steady'] * sum(1 for x in c['eff'] if x > 0) - sum(c['eff']) for c in pf.cohorts if c['fte'] > 0)
+    counted = sum(l['gain'] for l in imp if l['counted'])
+    more = sum(l['gain'] for l in imp if not l['counted'])
+    sections = [html('<div class="panel-head"><span class="muted small">Pool</span>' + _chips('pool', [(x, x) for x in pools], pool, args) + '</div>')]
+    sections.append({'type': 'kpis', 'items': [
+        K('New FTE joining', f'{new_fte:,.0f}', 'hires, contractors and partners in the horizon'),
+        K('Output lost to ramp-up', f'{lost:,.1f} FTE-months', 'new people below full output while they learn', 'warn' if lost > 1 else 'ok'),
+        K('Per permanent hire', f'{perm["loss"]:.2f} → {perm["loss2"]:.2f}', 'FTE-months lost, before → after counted levers', 'ok' if perm['loss2'] < perm['loss'] else ''),
+        K('Levers counted', f'+{counted:,.0f} FTE-months', f'+{more:,.0f} more if the planned and idea levers go ahead', 'ok'),
+    ]})
+    sections.append(callout(
+        'An engineer who joins is not 1.0 FTE on day one. New people usually start at about <b>0.5 effective FTE</b> while they learn the design flow, '
+        'tools and codebase, and reach full output over months. Contractors start faster but often plateau below 1.0 and cost more. '
+        f'Ramp-up is {"on" if pf.ramp_on else "off"} in the plan (Plan settings → Apply FTE ramp-up); levers counted: {_e(pf.lever_mode)}.', 'info'))
+    # ramp curves for the pool: baseline vs with levers
+    lev = pf.active_levers()
+    ks = list(range(0, 13))
+    series = []
+    for typ, (st, rm, sf, _) in pf.ramp_prof.items():
+        series.append((f'{typ}', [PF.Portfolio.factor(st, rm, sf, k) for k in ks], True))
+    st2, rm2, sf2 = pf.ramp_for(pool, 'Permanent hire', '9999-12', lev)
+    series.insert(0, ('Permanent hire with levers', [PF.Portfolio.factor(st2, rm2, sf2, k) for k in ks], False))
+    sections.append(chart(f'Ramp-up curves: effective FTE per person ({pool})',
+                          charts.lines([f'M{k + 1}' for k in ks], series, vmin=0.3, dec=2, xlab=lambda x: x, title='Effective FTE'),
+                          'Month 1 is the first month in the job. Dashed: profiles from FTE ramp-up profiles. Solid: a permanent hire in this pool with the counted levers.'))
+    rows = [dict(r, loss_cut=(r['loss'] - r['loss2'])) for r in ph]
+    sections.append(table('Ramp-up economics per new person', [col('type', 'Type'), col('start', 'Start factor', 'num2'), col('ramp', 'Months to steady', 'int'),
+                                                              col('steady', 'Steady factor', 'num2'), col('to90', 'Months to 90%', 'int'),
+                                                              col('loss', 'FTE-months lost', 'num2'), col('start2', 'Start (levers)', 'num2'),
+                                                              col('ramp2', 'Months (levers)', 'int'), col('loss2', 'Lost (levers)', 'num2'),
+                                                              col('premium', 'Cost premium %', 'num0')], rows, search=False,
+                          note='FTE-months lost = Σ over the ramp months of (steady factor − factor that month). Edit profiles in FTE ramp-up profiles.'))
+    # playbook from 0.5 to 1.0
+    st, rm, sf = st2, rm2, sf2
+    steps = [('Before day 1', None, 'Accounts, licences, laptop, repository and design documents ready; buddy named; first task chosen and scoped.',
+              'Starts productive work on day 1, not week 3.'),
+             ('Month 1', 0, 'Tool and flow training; run the existing regressions and flows; fix small, well-defined issues; shadow design reviews.',
+              'Runs the full flow for one block without help.'),
+             ('Month 2', 1, 'Owns a small block or test-plan section with buddy review; one project only (no split assignments).',
+              'First independent deliverable merged.'),
+             ('Month 3', 2, 'Owns a feature end to end; presents in design reviews; joins regression triage.',
+              'Closes own bugs; review rework falls below team median.'),
+             ('Month 4', 3, 'Takes on-call and triage rota; estimates own tasks; starts helping the next joiner.',
+              'Estimates within ±30%.'),
+             (f'Month {max(5, rm + 1)}', max(4, rm), 'Full ownership; design-flow certification complete; mentors basics to the next joiner.',
+              'Throughput at team median for two sprints (from Jira); estimates within ±20%.')]
+    prow = []
+    for name, k, act, exit_ in steps:
+        prow.append({'when': name, 'f': (PF.Portfolio.factor(st, rm, sf, k) if k is not None else None), 'act': act, 'exit': exit_})
+    sections.append(table(f'Plan to take a new {pool} engineer from {st:.2f} to {sf:.1f} FTE', [col('when', 'When'), col('f', 'Target FTE', 'num2'),
+                                                                                              col('act', 'What they do'), col('exit', 'Exit check')],
+                          prow, search=False,
+                          note='Targets follow the ramp profile with the counted levers. Measure progress with Jira throughput against the team median, '
+                               'review rework and regression contributions, not hours.'))
+    # pool: headcount vs effective vs demand
+    sections.append(chart(f'{pool}: headcount, effective FTE and demand',
+                          charts.lines(pf.months, [('Headcount', pf.headcount[pool], True), ('Effective FTE', pf.supply[pool], False),
+                                                   ('Committed demand', pf.load_committed[pool], False),
+                                                   ('Target capacity', [x * pf.target[pool] for x in pf.supply[pool]], True)], title=pool),
+                          'Effective FTE = existing team + each new cohort × its ramp factor, × (1 + productivity uplift from counted levers).'))
+    crow = [dict(c, eff_now=c['eff'][min(len(c['eff']) - 1, 2)], lost=(c['fte'] * c['steady'] * sum(1 for x in c['eff'] if x > 0) - sum(c['eff'])) if c['fte'] > 0 else 0)
+            for c in pf.cohorts]
+    sections.append(table('Capacity cohorts', [col('pool', 'Pool'), col('month', 'Joins', 'month'), col('type', 'Type'), col('fte', 'FTE', 'num1'),
+                                               col('start', 'Start factor', 'num2'), col('ramp', 'Months to steady', 'int'), col('steady', 'Steady', 'num2'),
+                                               col('lost', 'FTE-months lost', 'num1')], crow, search=False,
+                          note='From Capacity changes. Hiring plan = permanent ramp-up, Contractors = contractor, Partner = partner, Transfer = transfer.'))
+    lrows = [dict(l, s_t=('ok' if l['Status'] in ('Approved', 'In place') else 'warn' if l['Status'] == 'Planned' else 'info'),
+                  cnt=('Counted' if l['counted'] else 'Not counted')) for l in sorted(imp, key=lambda l: -l['gain'])]
+    sections.append(table('Productivity levers', [col('LeverID', 'ID'), col('Lever', 'Lever'), col('Pool', 'Pool'), col('From', 'From', 'month'),
+                                                  col('Effect', 'Effect'), col('Value', 'Value', 'num2'), col('Status', 'Status', 'badge', tone='s_t'),
+                                                  col('gain', 'FTE-months gained', 'num1'), col('value_k', 'Worth $k', 'num0'), col('cost_k', 'Cost $k', 'num0'),
+                                                  col('roi', 'Return ×', 'num1'), col('cnt', 'In plan')], lrows, search=False,
+                          note='Gain = effective FTE-months over the horizon with this lever alone, against none. Worth = gain × the pool\'s monthly cost per FTE. '
+                               'Edit in Productivity levers; choose which statuses count in Plan settings.'))
+    hv = WF.hire_vs_contract(pf, pool)
+    if hv:
+        orow = [dict(o, people_t=(str(o['people']) if o['people'] else 'too late'), f_t=('ok' if o['ok'] else 'bad')) for o in hv['options']]
+        sections.append(table(f'Cover the {pool} gap: {hv["gap"]:.1f} FTE over target from {mlabel(hv["gap_month"])}',
+                              [col('type', 'Option'), col('lead', 'Months to start', 'int'), col('start_m', 'Starts', 'month'),
+                               col('factor', f'Effective in {mlabel(hv["gap_month"])}', 'num2'), col('people_t', 'People needed', 'badge', tone='f_t'),
+                               col('steady_people', 'People once ramped', 'int'), col('cost12', '12-month cost $M', 'num2'),
+                               col('premium', 'Premium %', 'num0')], orow, search=False,
+                              note='People needed = gap ÷ effective factor in the gap month. Permanent hires use the pool\'s hiring lead time; '
+                                   'contractors 1 month, partners 2. Usually: contractors for the peak, permanent hires for the lasting need.'))
+    else:
+        sections.append(callout(f'{_e(pool)} stays within target capacity for the next 12 months on committed work.', 'ok'))
+    return page('pf-fte', sections)
+
+
+# ------------------------------------------------------------------ capacity risk management
+def wfrisk(R, args, ws):
+    from . import workforce as WF
+    try:
+        mult = float(args.get('attr') or 1.0)
+    except ValueError:
+        mult = 1.0
+    mult = max(0.0, min(mult, 5.0))
+    freeze = args.get('freeze') == '1'
+    cexit = (args.get('cexit') or '')[:7] or None
+    lose = args.get('lose') or None
+    lose_m = (args.get('lose_m') or '')[:7] or None
+    base = PF.Portfolio(ws)
+    risk = WF.stressed(ws, attr_mult=1.0)
+    stressed_on = mult != 1.0 or freeze or cexit or lose
+    st = WF.stressed(ws, attr_mult=mult, freeze=freeze, contractor_exit=cexit, lose_country=lose, lose_month=lose_m) if stressed_on else risk
+    reg = WF.risk_register(ws, base, st)
+    kr = st.kpis()
+    sections = [{'type': 'kpis', 'items': [
+        K('Capacity risks', str(len(reg)), f'{sum(1 for r in reg if r["score"] >= 15)} high (P×I ≥ 15)', 'bad' if any(r['score'] >= 15 for r in reg) else 'warn'),
+        K('Over target, risk-adjusted', f'{kr["overload_fte_m"]:,.0f} FTE-months', f'plan without attrition: {base.kpis()["overload_fte_m"]:,.0f}',
+          'bad' if kr['overload_fte_m'] > base.kpis()['overload_fte_m'] else 'ok'),
+        K('Attrition drag', f'{sum(WF.attrition_drag(base, p, mult) for p in base.pools):,.1f} FTE', 'effective FTE missing at any time while backfills hire and ramp'),
+        K('Key roles without backup', str(sum(1 for k in ws['tables'].get('pf_key_roles', []) if int(k['Backups']) == 0)), 'single points of failure', 'warn'),
+    ]}]
+    cs = sorted({c for r in base.pools.values() for c, _ in WF.countries(r.get('Countries'))})
+    opt = lambda vals, sel: ''.join(f'<option value="{_e(v)}" {"selected" if str(sel or "") == v else ""}>{_e(l)}</option>' for v, l in vals)
+    form = (f'<section class="panel"><h2>Stress test</h2><p class="sub">The risk-adjusted view always includes expected attrition. Add shocks and press Run.</p>'
+            f'<form method="get" class="formgrid">'
+            f'<label>Attrition<select name="attr">{opt([("1", "Expected rate"), ("1.5", "1.5× expected"), ("2", "2× expected"), ("3", "3× expected")], args.get("attr") or "1")}</select></label>'
+            f'<label>Hiring<select name="freeze">{opt([("", "Hires join as planned"), ("1", "Hiring freeze")], args.get("freeze"))}</select></label>'
+            f'<label>Contractors leave from<input type="month" name="cexit" value="{_e(cexit or "")}"></label>'
+            f'<label>Lose a country<select name="lose"><option value="">–</option>{opt([(c, c) for c in cs], lose)}</select></label>'
+            f'<label>from<input type="month" name="lose_m" value="{_e(lose_m or base.start)}"></label>'
+            f'<div><button class="btn" type="submit">Run</button> <a class="btn ghost" href="/m/pf-wfrisk">Reset</a></div></form>'
+            + (f'<p class="small">Applied: {_e("; ".join(st.stress_notes))}.</p>' if stressed_on else '') + '</section>')
+    sections.append(html(form))
+    # heatmap
+    grid = defaultdict(list)
+    for r in reg:
+        grid[(r['P'], r['I'])].append(r['id'])
+    cells = ['<div class="h"></div>'] + [f'<div class="h">I{i}</div>' for i in range(1, 6)]
+    for p_ in range(5, 0, -1):
+        cells.append(f'<div class="h">P{p_}</div>')
+        for i in range(1, 6):
+            z = 'z3' if p_ * i >= 15 else 'z2' if p_ * i >= 8 else 'z1'
+            cells.append(f'<div class="{z}" title="P{p_} × I{i}">{_e(" ".join(grid.get((p_, i), [])))}</div>')
+    by_cat = defaultdict(int)
+    for r in reg:
+        by_cat[r['cat']] += 1
+    sections.append(cols2(html(f'<section class="panel"><h2>Risk heatmap</h2><p class="sub">Probability × impact of each capacity risk.</p>'
+                               f'<div class="riskgrid">{"".join(cells)}</div></section>'),
+                          chart('Risks by type', charts.bars(list(by_cat), [('Risks', list(by_cat.values()))], title='Risks by type'))))
+    rows = [dict(r, s_t=('bad' if r['score'] >= 15 else 'warn' if r['score'] >= 8 else 'ok')) for r in reg]
+    sections.append(table('Capacity risk register', [col('id', 'ID'), col('cat', 'Type'), col('pool', 'Pool'), col('title', 'Risk'),
+                                                     col('measure', 'Size'), col('score', 'P×I', 'badge', tone='s_t'), col('mitigation', 'Mitigation'),
+                                                     col('owner', 'Owner'), col('due', 'Act by', 'date')], rows,
+                          note='Generated from the data each time: attrition, hiring lead time, ramp-up timing, contractor dependency, site concentration, '
+                               'sustained utilisation and key roles. Impact scales with the FTE gap as a share of the pool.'))
+    # stress comparison by pool
+    prow = []
+    for p_ in base.pools:
+        def peak(pf):
+            return max([pf.load_committed[p_][i] / pf.supply[p_][i] * 100 if pf.supply[p_][i] else 0 for i in range(pf.H)] + [0])
+        def over(pf):
+            return sum(max(0, pf.load_committed[p_][i] - pf.supply[p_][i] * pf.target[p_]) for i in range(pf.H))
+        prow.append({'pool': p_, 'b_peak': peak(base), 'r_peak': peak(risk), 's_peak': peak(st), 'b_over': over(base), 's_over': over(st),
+                     'target': base.target[p_] * 100, 'countries': base.pools[p_].get('Countries'),
+                     'attr': float(base.pools[p_].get('AttritionPct') or 0), 'lead': base.pools[p_].get('HiringLeadMonths')})
+    sections.append(table('Pools under stress', [col('pool', 'Pool'), col('countries', 'Countries'), col('attr', 'Attrition %/yr', 'num0'),
+                                                 col('lead', 'Hiring lead (months)', 'int'), col('target', 'Target %', 'num0'),
+                                                 col('b_peak', 'Peak util: plan %', 'num0'), col('r_peak', 'Risk-adjusted %', 'num0'),
+                                                 col('s_peak', 'Stressed %', 'num0'), col('b_over', 'Over target: plan', 'num1'),
+                                                 col('s_over', 'Over target: stressed', 'num1')], prow, search=False,
+                          note='Peak utilisation on committed work. "Over target" in FTE-months over the horizon.'))
+    moved = [{'name': p['Name'], 'base': base.projects[pid].get('funding_result'), 'st': p.get('funding_result'),
+              'bh': base.projects[pid]['health'], 'sh': p['health']}
+             for pid, p in st.projects.items() if pid in base.projects and (p.get('funding_result') != base.projects[pid].get('funding_result')
+                                                                           or p['health'] != base.projects[pid]['health'])]
+    sections.append(table('Projects affected', [col('name', 'Project'), col('base', 'Funding: plan'), col('st', 'Funding: stressed'),
+                                                col('bh', 'Health: plan'), col('sh', 'Health: stressed')], moved, search=False,
+                          empty='No project changes funding or health under this stress.'))
+    names = {pid: p['Name'] for pid, p in base.projects.items()}
+    kr_rows = [dict(k, project=names.get(k.get('ProjectID') or '', '–'), b_t=('bad' if int(k['Backups']) == 0 else 'ok'),
+                    cover=('No backup' if int(k['Backups']) == 0 else f'{k["Backups"]} backup(s)')) for k in ws['tables'].get('pf_key_roles', [])]
+    sections.append(table('Key roles', [col('RoleID', 'ID'), col('Role', 'Role'), col('Pool', 'Pool'), col('project', 'Project'),
+                                        col('Holders', 'Holders', 'int'), col('cover', 'Cover', 'badge', tone='b_t'), col('Country', 'Country')],
+                          kr_rows, search=False, note='Edit in Key roles. A role with no backup is a key-person risk.'))
+    return page('pf-wfrisk', sections)

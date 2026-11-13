@@ -42,6 +42,8 @@ ICONS = {
     'scenario': 'M6 3v6a6 6 0 0 0 12 0V3M12 15v6M8 21h8',
     'gate': 'M4 21V4h16v17M4 10h16M9 21v-6h6v6',
     'raid': 'M12 3l9 16H3zM12 10v4M12 17h.01',
+    'ramp': 'M3 20h18M5 17l4-5 4 2 6-8',
+    'shield': 'M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6zM9 12l2 2 4-4',
     'link': 'M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1',
     'qbr': 'M12 3l2.6 5.6 6 .7-4.5 4 1.2 6L12 16.4 6.7 19.3l1.2-6-4.5-4 6-.7z',
     'customer': 'M8 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7zM2 20c0-3.3 2.7-6 6-6s6 2.7 6 6M16 4.5a3.5 3.5 0 0 1 0 6.5M18 14c2.4.8 4 3 4 6',
@@ -75,6 +77,8 @@ NAV = [
     ('pf-overview', 'Portfolio & roadmaps', 'Portfolio Overview', 'portfolio'),
     ('pf-roadmap', 'Portfolio & roadmaps', 'Roadmap', 'roadmap'),
     ('pf-capacity', 'Portfolio & roadmaps', 'Resource Capacity', 'people'),
+    ('pf-fte', 'Portfolio & roadmaps', 'FTE Ramp & Productivity', 'ramp'),
+    ('pf-wfrisk', 'Portfolio & roadmaps', 'Capacity Risk Management', 'shield'),
     ('pf-priority', 'Portfolio & roadmaps', 'Prioritisation & Funding', 'rank'),
     ('pf-scenarios', 'Portfolio & roadmaps', 'Scenario Planner', 'scenario'),
     ('pf-board', 'Portfolio & roadmaps', 'Portfolio Board & Gates', 'gate'),
@@ -98,7 +102,7 @@ NAV = [
     ('method', 'Help', 'How It Calculates', 'help'),
 ]
 
-SUB = {'m1-dashboard', 'pullin', 'flow-dashboard', 'pf-roadmap', 'pf-capacity', 'pf-priority', 'pf-scenarios', 'pf-board', 'pf-raid', 'pf-integrations'}   # shown indented under the module above them
+SUB = {'m1-dashboard', 'pullin', 'flow-dashboard', 'pf-roadmap', 'pf-capacity', 'pf-fte', 'pf-wfrisk', 'pf-priority', 'pf-scenarios', 'pf-board', 'pf-raid', 'pf-integrations'}   # shown indented under the module above them
 
 GROUP_ORDER = ['Planning modules', 'Capacity & engineering', 'Procurement & B2B', 'Vendors, customers & quality', 'Portfolio & roadmaps', 'Analytics & monitoring', 'Data & setup', 'Help']
 
@@ -319,6 +323,29 @@ INFO = {
         tables=['pf_pools', 'pf_capacity_changes', 'pf_demand'],
         tryit=['Pick Verification: the January 2027 peak is over target on committed work alone.',
                'Switch to Everything proposed to see the demand the business wants against what engineering has.']),
+    'pf-fte': dict(
+        title='FTE Ramp & Productivity',
+        summary='How new engineers, contractors and partners grow from about 0.5 to 1.0 effective FTE, what that costs in lost output, and the levers that close the gap faster.',
+        what='Headcount is not capacity. Each new cohort in Capacity changes starts at its type\'s start factor and ramps to its steady factor; productivity levers shorten the ramp, raise the start, or lift the whole pool. The plan uses effective FTE, so every capacity, funding and scenario result already includes ramp-up. The page also gives a month-by-month plan to take a new engineer to full output and compares hiring, contractors, partners and transfers for the next gap.',
+        how=['Factor in month k (k = 0 is the first month) = start + (steady − start) × min(1, k ÷ ramp months).',
+             'Effective FTE = (existing FTE + Σ cohort FTE × factor) × (1 + Σ productivity uplift % of counted levers from their month).',
+             'FTE-months lost per new person = Σ over the ramp months of (steady − factor).',
+             'Levers: Shorter ramp cuts the ramp months, Higher start factor adds to the start, Productivity uplift lifts the pool from its month; each applies to cohorts that join from its From month.',
+             'People needed for a gap = gap FTE ÷ effective factor in the gap month, after each option\'s lead time (permanent: the pool\'s hiring lead; contractor 1 month; partner 2; transfer 1).'],
+        tables=['pf_ramp', 'pf_levers', 'pf_capacity_changes', 'pf_pools'],
+        tryit=['Set Productivity levers counted to All in Plan settings and see Verification\'s effective capacity rise.',
+               'Change the Permanent hire start factor to 0.3 and watch the hire-vs-contract table.']),
+    'pf-wfrisk': dict(
+        title='Capacity Risk Management',
+        summary='Risks to engineering capacity: attrition, hiring lead times, ramp-up timing, contractor dependency, site concentration, burnout and key people, with a stress test.',
+        what='The risk register is written from the data each time. The risk-adjusted plan includes expected attrition: leavers are replaced only after the hiring lead time and ramp-up, so some capacity is always missing. Stress the plan with higher attrition, a hiring freeze, contractors leaving, or losing a country, and see which pools and projects break.',
+        how=['Attrition drag = FTE × attrition % ÷ 12 × (hiring lead months + ramp months × (steady − average ramp factor)).',
+             'Hiring lead risk: requisitions must open by first over-target month − hiring lead − months to reach 80% output; if that is already past, use contractors or re-phase.',
+             'Probability 1-5 from rates and timing; impact 1-5 from the FTE gap as a share of the pool (≥ 8% = 5).',
+             'Contractor dependency ≥ 15% of effective capacity; site concentration ≥ 80% in one country; burnout = 4+ months in a row at or near target.'],
+        tables=['pf_pools', 'pf_key_roles', 'pf_capacity_changes', 'pf_ramp'],
+        tryit=['Run attrition at 2× and see which projects lose their place on the funding line.',
+               'Lose India from March 2027 to see the site-concentration exposure of verification and physical design.']),
     'pf-priority': dict(
         title='Prioritisation & Funding',
         summary='Value-based priority score for every project, and a funding line that decides what fits in engineering capacity, what fits only with a later start, and what does not fit.',
@@ -506,6 +533,8 @@ TOUR = [
     ('vendor-qbr', 'Run the vendor QBR', 'The scorecard ranks the three OSATs from data already in the workspace. Close OSAT-C\'s overdue issues and watch its responsiveness score and rank move, then download its QBR pack.'),
     ('customers', 'Rate your customers', 'Customer Gamma cancelled and reduced agreed orders, so it is rated Risk: build to firm PO only. Customer Alpha took every order as agreed.'),
     ('pf-overview', 'Plan the engineering portfolio', 'The portfolio section plans products and platforms against engineering capacity. The executive summary names the verification crunch in early 2027, the Topaz slip that now holds up Jasper, and the highest-value proposal that does not fit yet.'),
+    ('pf-fte', 'Headcount is not capacity', 'New engineers start near 0.5 FTE and reach 1.0 over months. See what ramp-up costs, the 30-60-90 plan that shortens it, and why contractors cover the January verification peak while permanent hires cannot arrive in time.'),
+    ('pf-wfrisk', 'Manage capacity risk', 'The register lists attrition, hiring lead time, key-person and site risks with actions and dates. Run attrition at 2× or lose a country and see which projects drop.'),
     ('pf-scenarios', 'Test a scenario', 'Run "Verification contractors": over-target FTE-months fall and every proposal moves up the funding line. Then build your own what-if and save it.'),
     ('pf-board', 'Take it to the Portfolio Board', 'Each gate gets a recommendation from readiness, capacity, risk and dependencies. Record a decision and download the board pack, or publish it to Confluence.'),
     ('io', 'Use your own data', 'Download the workspace as Excel, replace the demo rows with your own (anonymised if needed), and upload it. Every module then runs on your data.'),

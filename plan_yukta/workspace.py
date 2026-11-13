@@ -35,6 +35,8 @@ PF_BUS = ['Infrastructure', 'Client', 'Automotive', 'IoT', 'Platform']
 PF_CATEGORIES = ['CPU IP', 'GPU IP', 'AI accelerator IP', 'Compute subsystem', 'System IP', 'Security IP', 'Software & tools', 'Silicon & chiplets']
 PF_STAGES = ['Idea', 'Concept', 'Plan', 'Develop', 'Validate', 'Release', 'Sustain', 'Stopped']
 PF_GATES = ['G0 Concept', 'G1 Plan approval', 'G2 Development commit', 'G3 Alpha', 'G4 Beta', 'G5 Release']
+PF_RAMP_TYPES = ['Permanent hire', 'Contractor', 'Partner', 'Transfer']
+PF_LEVER_EFFECTS = ['Shorter ramp (months)', 'Higher start factor', 'Productivity uplift %']
 PF_CRITERIA = ['Value', 'Strategic fit', 'Customer demand', 'Time criticality', 'Technical risk']
 
 
@@ -374,7 +376,10 @@ TABLES = {
         'about': 'Engineering capacity by skill pool: full-time equivalents today and the utilisation you plan to.',
         'used_by': ['Resource Capacity', 'Prioritisation & Funding'],
         'columns': [C('Pool'), C('FTE', 'num', 'Engineers today.', lo=0, hi=100000), C('TargetUtilPct', 'num', lo=10, hi=120),
-                    C('CostPerFTEk', 'num', 'Loaded cost per FTE-year, $k.', lo=0, hi=10000), C('Site', required=False)],
+                    C('CostPerFTEk', 'num', 'Loaded cost per FTE-year, $k.', lo=0, hi=10000),
+                    C('Countries', help='Where the pool sits, with % of its FTE, e.g. "India 70 / US 30".', required=False),
+                    C('AttritionPct', 'num', 'Expected leavers per year, % of the pool.', lo=0, hi=60, required=False),
+                    C('HiringLeadMonths', 'int', 'Months from opening a requisition to the person starting.', lo=0, hi=24, required=False)],
     },
     'pf_capacity_changes': {
         'title': 'Capacity changes', 'group': 'Portfolio', 'key': ['Pool', 'Month', 'Reason'],
@@ -382,6 +387,33 @@ TABLES = {
         'used_by': ['Resource Capacity'],
         'columns': [C('Pool'), C('Month', 'month'), C('DeltaFTE', 'num', lo=-10000, hi=10000),
                     C('Reason', 'choice', choices=['Hiring plan', 'Contractors', 'Transfer', 'Attrition', 'Partner'])],
+    },
+    'pf_ramp': {
+        'title': 'FTE ramp-up profiles', 'group': 'Portfolio', 'key': ['Type'],
+        'about': 'How fast new capacity becomes productive: effectiveness in the first month, months to reach full output, '
+                 'the steady level reached, and the cost premium over a permanent FTE.',
+        'used_by': ['FTE Ramp & Productivity', 'Resource Capacity', 'Capacity Risk Management'],
+        'columns': [C('Type', 'choice', choices=PF_RAMP_TYPES), C('StartFactor', 'num', 'Effective FTE per person in the first month (0.5 = half).', lo=0, hi=1.5),
+                    C('RampMonths', 'int', 'Months to reach the steady factor.', lo=0, hi=24),
+                    C('SteadyFactor', 'num', 'Effective FTE per person once ramped (1.0 = full).', lo=0, hi=1.5),
+                    C('CostPremiumPct', 'num', 'Cost over a permanent FTE in the same pool, %.', lo=-80, hi=400), C('Notes', required=False)],
+    },
+    'pf_levers': {
+        'title': 'Productivity levers', 'group': 'Portfolio', 'key': ['LeverID'],
+        'about': 'Actions that move new people from 0.5 to 1.0 faster or raise output of the whole pool: onboarding, reuse, automation, fewer project splits.',
+        'used_by': ['FTE Ramp & Productivity', 'Capacity Risk Management'],
+        'columns': [C('LeverID'), C('Lever'), C('Pool', help='A skill pool, or All.'), C('From', 'month'),
+                    C('Effect', 'choice', choices=PF_LEVER_EFFECTS),
+                    C('Value', 'num', 'Months cut, start-factor points added (0.15), or % uplift.', lo=-100, hi=100),
+                    C('CostUSDk', 'num', lo=0, hi=1e6, required=False), C('Status', 'choice', choices=['Idea', 'Planned', 'Approved', 'In place']),
+                    C('Owner', required=False), C('Notes', required=False)],
+    },
+    'pf_key_roles': {
+        'title': 'Key roles', 'group': 'Portfolio', 'key': ['RoleID'],
+        'about': 'Roles a project cannot lose: how many people hold the knowledge and how many trained backups exist.',
+        'used_by': ['Capacity Risk Management'],
+        'columns': [C('RoleID'), C('Role'), C('Pool'), C('ProjectID', required=False), C('Holders', 'int', lo=0, hi=1000),
+                    C('Backups', 'int', lo=0, hi=1000), C('Country', required=False), C('Notes', required=False)],
     },
     'pf_demand': {
         'title': 'Resource demand', 'group': 'Portfolio', 'key': ['ProjectID', 'Pool', 'From'],
@@ -415,10 +447,11 @@ TABLES = {
     },
     'pf_scenarios': {
         'title': 'Scenarios', 'group': 'Portfolio', 'key': ['Scenario', 'Seq'],
-        'about': 'Named what-if scenarios. Each row changes one thing: delay a project, stop it, fund it, scale its demand, or add pool capacity.',
+        'about': 'Named what-if scenarios. Each row changes one thing: delay a project, stop it, fund it, scale its demand, add contractors or hire permanent staff.',
         'used_by': ['Scenario Planner'],
         'columns': [C('Scenario'), C('Seq', 'int', lo=1, hi=999),
-                    C('Change', 'choice', choices=['Delay months', 'Stop', 'Fund', 'Scale demand %', 'Add FTE']),
+                    C('Change', 'choice', choices=['Delay months', 'Stop', 'Fund', 'Scale demand %', 'Add FTE', 'Hire FTE'],
+                      help='Add FTE = contractors (contractor ramp-up); Hire FTE = permanent hires (permanent ramp-up).'),
                     C('ProjectID', required=False), C('Pool', required=False), C('Month', 'month', required=False),
                     C('Value', 'num', lo=-10000, hi=10000, required=False), C('Note', required=False)],
     },
@@ -466,6 +499,8 @@ SETTINGS = {
     'SPC sigma': ('num', 3, 'Post-Silicon: control limits at mean ± this many standard deviations.', 1, 6),
     'Portfolio horizon months': ('int', 24, 'Portfolio: months of resource capacity planned from the plan start.', 6, 48),
     'Portfolio quarter start month': ('int', 1, 'Portfolio: first month of the fiscal year (1 = January).', 1, 12),
+    'Apply FTE ramp-up': ('choice:Y,N', 'Y', 'Portfolio: new hires, contractors and partners start below full output (FTE ramp-up profiles).', None, None),
+    'Productivity levers counted': ('choice:Approved,All,None', 'Approved', 'Portfolio: which levers raise effective capacity (Approved = Approved and In place).', None, None),
     'Capacity buffer %': ('num', 15, 'Tester Capacity: headroom you want above the plan.', 0, 100),
 }
 

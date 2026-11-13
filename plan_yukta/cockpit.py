@@ -1709,9 +1709,10 @@ def checks_view(p: Plan):
         bad = sorted({r[c] for r in t.get(name, []) for c in cols if r.get(c) and r[c] not in pids})
         if bad:
             out.append(('warning', name, f'{TABLES[name]["title"]} mentions projects not in Portfolio projects: {", ".join(bad[:6])}; those rows are ignored.'))
-    badp = sorted({r['Pool'] for r in t.get('pf_demand', []) + t.get('pf_capacity_changes', []) if r['Pool'] not in pools})
+    badp = sorted({r['Pool'] for r in t.get('pf_demand', []) + t.get('pf_capacity_changes', []) + t.get('pf_key_roles', [])
+                   + [l for l in t.get('pf_levers', []) if l['Pool'] != 'All'] if r['Pool'] not in pools})
     if badp:
-        out.append(('warning', 'pf_demand', f'Resource demand or capacity changes use pools not in Skill pools: {", ".join(badp[:6])}; ignored.'))
+        out.append(('warning', 'pf_demand', f'Portfolio tables use pools not in Skill pools: {", ".join(badp[:6])}; those rows are ignored.'))
     rev = [r for r in t.get('pf_demand', []) if r['To'] < r['From']]
     if rev:
         out.append(('error', 'pf_demand', f'{len(rev)} resource demand rows end before they start (e.g. {rev[0]["ProjectID"]} {rev[0]["Pool"]}).'))
@@ -1751,7 +1752,7 @@ def home_view(p: Plan, R):
     checks = R['checks']['items']
     sev = {'high': 0, 'medium': 1, 'low': 2}
     seen, alerts = set(), []
-    for a in sorted(p.alerts, key=lambda a: (sev.get(a['severity'], 3), a['month'])):
+    for a in sorted(p.alerts, key=lambda a: (sev.get(a['severity'], 3), str(a.get('month') or ''))):
         k = (a['module'], a['text'])
         if k not in seen:
             seen.add(k)

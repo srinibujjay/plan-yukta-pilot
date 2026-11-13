@@ -18,6 +18,10 @@ CRIT_COL = {'Value': 'ValueUSDm', 'Strategic fit': 'StrategicFit', 'Customer dem
 DEFAULT_W = {'Value': 35, 'Strategic fit': 20, 'Customer demand': 20, 'Time criticality': 15, 'Technical risk': 10}
 STAGE_ORDER = ['Idea', 'Concept', 'Plan', 'Develop', 'Validate', 'Release', 'Sustain', 'Stopped']
 MAX_SHIFT = 12
+DEFAULT_RAMP = {'Permanent hire': (0.5, 6, 1.0, 0.0), 'Contractor': (0.5, 3, 0.9, 35.0), 'Partner': (0.6, 2, 0.85, 20.0),
+                'Transfer': (0.7, 3, 1.0, 0.0)}
+REASON_TYPE = {'Hiring plan': 'Permanent hire', 'Contractors': 'Contractor', 'Partner': 'Partner', 'Transfer': 'Transfer',
+               'Scenario': 'Contractor'}
 
 
 def mdiff(a, b):
@@ -63,11 +67,12 @@ def apply_scenario(tables, changes):
             for d in t['pf_demand']:
                 if d['ProjectID'] == pid:
                     d['FTE'] = max(0.0, float(d['FTE']) * f)
-        elif kind == 'Add FTE':
+        elif kind in ('Add FTE', 'Hire FTE'):
             if not c.get('Pool') or not c.get('Month'):
-                notes.append(f'Row {c.get("Seq")}: Add FTE needs a Pool and a Month; skipped.')
+                notes.append(f'Row {c.get("Seq")}: {kind} needs a Pool and a Month; skipped.')
                 continue
-            t['pf_capacity_changes'].append({'Pool': c['Pool'], 'Month': c['Month'], 'DeltaFTE': float(val or 0), 'Reason': 'Scenario'})
+            t['pf_capacity_changes'].append({'Pool': c['Pool'], 'Month': c['Month'], 'DeltaFTE': float(val or 0),
+                                             'Reason': 'Scenario' if kind == 'Add FTE' else 'Hiring plan'})
     return t, notes
 
 
@@ -106,16 +111,84 @@ class Portfolio:
     def _idx(self, m):
         return mdiff(self.start, m)
 
+    # ---- FTE ramp-up and productivity levers
+    def ramp_profiles(self):
+        prof = dict(DEFAULT_RAMP)
+        for r in self.t.get('pf_ramp') or []:
+            prof[r['Type']] = (float(r['StartFactor']), int(r['RampMonths']), float(r['SteadyFactor']), float(r['CostPremiumPct'] or 0))
+        return prof
+
+    def active_levers(self, mode=None):
+        mode = mode or self.lever_mode
+        ok = {'None': (), 'Approved': ('Approved', 'In place'),
+              'All': ('Idea', 'Planned', 'Approved', 'In place')}.get(mode, ('Approved', 'In place'))
+        return [l for l in self.t.get('pf_levers') or [] if l['Status'] in ok]
+
+    def ramp_for(self, pool, typ, start_month, levers):
+        """(start factor, ramp months, steady factor) for a cohort starting in start_month, after levers."""
+        st, rm, sf, _ = self.ramp_prof.get(typ, self.ramp_prof['Permanent hire'])
+        for l in levers:
+            if l['Pool'] not in (pool, 'All') or start_month < l['From']:
+                continue
+            if l['Effect'] == 'Shorter ramp (months)':
+                rm = max(0, rm - int(round(float(l['Value']))))
+            elif l['Effect'] == 'Higher start factor':
+                st = min(max(sf, st), st + float(l['Value']))
+        return st, rm, sf
+
+    @staticmethod
+    def factor(st, rm, sf, k):
+        if k < 0:
+            return 0.0
+        if rm <= 0:
+            return sf
+        return st + (sf - st) * min(1.0, k / rm)
+
+    def uplift(self, pool, i, levers):
+        m = self.months[i]
+        return sum(float(l['Value']) / 100 for l in levers
+                   if l['Effect'] == 'Productivity uplift %' and l['Pool'] in (pool, 'All') and m >= l['From'])
+
+    def effective_supply(self, changes, levers, ramp=True):
+        """Headcount and effective FTE per pool and month, plus each cohort's effective contribution."""
+        H = self.H
+        nominal = {p: [float(r['FTE'])] * H for p, r in self.pools.items()}
+        eff = {p: [float(r['FTE'])] * H for p, r in self.pools.items()}
+        cohorts = []
+        for c in changes:
+            pool = c['Pool']
+            if pool not in nominal:
+                continue
+            d = float(c['DeltaFTE'])
+            k0 = self._idx(c['Month'])
+            typ = REASON_TYPE.get(c.get('Reason'), 'Permanent hire')
+            st, rm, sf = self.ramp_for(pool, typ, c['Month'], levers) if (d > 0 and ramp) else (1.0, 0, 1.0)
+            row = {'pool': pool, 'month': c['Month'], 'reason': c.get('Reason'), 'type': typ if d > 0 else 'Leaver', 'fte': d,
+                   'start': st, 'ramp': rm, 'steady': sf, 'eff': [0.0] * H}
+            for i in range(H):
+                k = i - k0
+                if k < 0:
+                    continue
+                f = self.factor(st, rm, sf, k) if d > 0 else 1.0
+                nominal[pool][i] += d
+                row['eff'][i] = d * f
+                eff[pool][i] += d * f
+            cohorts.append(row)
+        for p in eff:
+            for i in range(H):
+                nominal[p][i] = max(0.0, nominal[p][i])
+                eff[p][i] = max(0.0, eff[p][i] * (1 + self.uplift(p, i, levers)))
+        return nominal, eff, cohorts
+
     def _capacity(self):
         H = self.H
-        self.supply = {p: [float(r['FTE'])] * H for p, r in self.pools.items()}
         self.target = {p: float(r['TargetUtilPct']) / 100 for p, r in self.pools.items()}
-        for c in self.t['pf_capacity_changes']:
-            if c['Pool'] not in self.supply:
-                continue
-            i0 = max(0, self._idx(c['Month']))
-            for i in range(i0, H):
-                self.supply[c['Pool']][i] = max(0.0, self.supply[c['Pool']][i] + float(c['DeltaFTE']))
+        self.ramp_on = str(self.s.get('Apply FTE ramp-up', 'Y')) == 'Y'
+        self.lever_mode = str(self.s.get('Productivity levers counted', 'Approved'))
+        self.ramp_prof = self.ramp_profiles()
+        levers = self.active_levers() if self.ramp_on else []
+        self.headcount, eff, self.cohorts = self.effective_supply(self.t['pf_capacity_changes'], levers, self.ramp_on)
+        self.supply = eff if self.ramp_on else {p: list(v) for p, v in self.headcount.items()}
         self.pdem = defaultdict(lambda: defaultdict(lambda: [0.0] * H))      # project -> pool -> months
         self.unknown_pools = set()
         for d in self.t['pf_demand']:

@@ -223,6 +223,7 @@ BUILDERS = {
 PF_BUILDERS = {
     'pf-overview': pf_views.overview, 'pf-roadmap': pf_views.roadmap, 'pf-capacity': pf_views.capacity, 'pf-priority': pf_views.priority,
     'pf-scenarios': pf_views.scenario, 'pf-board': pf_views.board, 'pf-raid': pf_views.raid, 'pf-integrations': pf_views.integrations,
+    'pf-fte': pf_views.fte, 'pf-wfrisk': pf_views.wfrisk,
 }
 
 

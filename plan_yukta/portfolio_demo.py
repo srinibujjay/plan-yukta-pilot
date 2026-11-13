@@ -53,16 +53,16 @@ PROJECTS = [
      'Maintenance releases and errata fixes for shipping cores.'),
 ]
 
-POOLS = [  # Pool, FTE, target util %, cost per FTE-year $k, site
-    ('Architecture', 22, 90, 260, 'Cambridge'),
-    ('CPU design', 105, 90, 230, 'Cambridge / Austin'),
-    ('GPU & ML design', 36, 90, 230, 'Cambridge / Trondheim'),
-    ('Verification', 190, 92, 200, 'Cambridge / Bengaluru'),
-    ('Physical design', 66, 90, 210, 'Bengaluru / Austin'),
-    ('Performance modelling', 22, 85, 240, 'Cambridge'),
-    ('Software & tools', 66, 88, 190, 'Manchester / Bengaluru'),
-    ('Silicon & test', 13, 85, 210, 'Austin'),
-    ('Program management', 26, 90, 180, 'Cambridge'),
+POOLS = [  # Pool, FTE, target util %, cost per FTE-year $k, countries, attrition %/yr, hiring lead months
+    ('Architecture', 22, 90, 260, 'US 60 / Canada 40', 5, 8),
+    ('CPU design', 105, 90, 230, 'US 50 / India 50', 9, 6),
+    ('GPU & ML design', 36, 90, 230, 'Canada 70 / Taiwan 30', 8, 6),
+    ('Verification', 190, 92, 200, 'India 70 / US 30', 14, 4),
+    ('Physical design', 66, 90, 210, 'India 60 / Taiwan 40', 13, 5),
+    ('Performance modelling', 22, 85, 240, 'US 100', 7, 6),
+    ('Software & tools', 66, 88, 190, 'India 60 / Canada 40', 12, 3),
+    ('Silicon & test', 13, 85, 210, 'Taiwan 85 / US 15', 8, 5),
+    ('Program management', 26, 90, 180, 'US 50 / India 50', 7, 3),
 ]
 
 DESIGN_POOL = {'CPU IP': 'CPU design', 'GPU IP': 'GPU & ML design', 'AI accelerator IP': 'GPU & ML design',
@@ -106,7 +106,47 @@ def build(as_of='2026-11-10'):
                          Confidence=conf, ValueUSDm=val, StrategicFit=fit, CustomerDemand=dem, TimeCriticality=tc, TechRisk=risk,
                          JiraKey=jk, LinkedSKU=sku, Notes=note))
     t['pf_projects'] = proj
-    t['pf_pools'] = [dict(Pool=p, FTE=f, TargetUtilPct=u, CostPerFTEk=c, Site=s) for p, f, u, c, s in POOLS]
+    t['pf_pools'] = [dict(Pool=p, FTE=f, TargetUtilPct=u, CostPerFTEk=c, Countries=s, AttritionPct=a, HiringLeadMonths=l)
+                     for p, f, u, c, s, a, l in POOLS]
+    t['pf_ramp'] = [
+        dict(Type='Permanent hire', StartFactor=0.5, RampMonths=6, SteadyFactor=1.0, CostPremiumPct=0,
+             Notes='Learns the design flow, tools and codebase; full output after about six months.'),
+        dict(Type='Contractor', StartFactor=0.5, RampMonths=3, SteadyFactor=0.9, CostPremiumPct=35,
+             Notes='Experienced but new to our flow; usually kept on well-scoped tasks.'),
+        dict(Type='Partner', StartFactor=0.6, RampMonths=2, SteadyFactor=0.85, CostPremiumPct=20,
+             Notes='Design-services team working to a statement of work.'),
+        dict(Type='Transfer', StartFactor=0.7, RampMonths=3, SteadyFactor=1.0, CostPremiumPct=0,
+             Notes='Internal move: knows the tools, new to the project.'),
+    ]
+    t['pf_levers'] = [
+        dict(LeverID='L-01', Lever='Structured onboarding with a named buddy and a 30-60-90 plan', Pool='Verification', From='2026-12',
+             Effect='Shorter ramp (months)', Value=2, CostUSDk=60, Status='Approved', Owner='Verification director',
+             Notes='First task scoped in week 1; buddy spends 20% of time for 8 weeks.'),
+        dict(LeverID='L-02', Lever='Reusable verification environment and testbench library', Pool='Verification', From='2027-02',
+             Effect='Productivity uplift %', Value=5, CostUSDk=180, Status='Planned', Owner='Verification methodology lead', Notes=None),
+        dict(LeverID='L-03', Lever='Pre-start access and a knowledge pack for contractors and new hires', Pool='All', From='2026-12',
+             Effect='Higher start factor', Value=0.15, CostUSDk=40, Status='Approved', Owner='Engineering operations',
+             Notes='Accounts, tools, licences and design documents ready on day one.'),
+        dict(LeverID='L-04', Lever='One project per engineer: no splits below 0.5 FTE', Pool='CPU design', From='2027-01',
+             Effect='Productivity uplift %', Value=4, CostUSDk=0, Status='Planned', Owner='CPU design director',
+             Notes='Context switching between projects costs output.'),
+        dict(LeverID='L-05', Lever='Regression and implementation-flow automation', Pool='Physical design', From='2027-03',
+             Effect='Productivity uplift %', Value=6, CostUSDk=250, Status='Idea', Owner='Implementation lead', Notes=None),
+        dict(LeverID='L-06', Lever='Design-flow certification for new physical design engineers', Pool='Physical design', From='2027-01',
+             Effect='Shorter ramp (months)', Value=1, CostUSDk=30, Status='Approved', Owner='Implementation lead', Notes=None),
+        dict(LeverID='L-07', Lever='Shared IP documentation and design-review checklists', Pool='All', From='2027-04',
+             Effect='Productivity uplift %', Value=2, CostUSDk=90, Status='Planned', Owner='Engineering operations', Notes=None),
+    ]
+    t['pf_key_roles'] = [
+        dict(RoleID='K-01', Role='Coherency architect', Pool='Architecture', ProjectID='PF-08', Holders=1, Backups=0, Country='US', Notes=None),
+        dict(RoleID='K-02', Role='Memory-tagging verification lead', Pool='Verification', ProjectID='PF-01', Holders=1, Backups=0, Country='India', Notes=None),
+        dict(RoleID='K-03', Role='Functional-safety manager', Pool='Program management', ProjectID='PF-06', Holders=1, Backups=1, Country='US', Notes=None),
+        dict(RoleID='K-04', Role='Test-chip package engineer', Pool='Silicon & test', ProjectID='PF-11', Holders=1, Backups=0, Country='Taiwan', Notes=None),
+        dict(RoleID='K-05', Role='Shader architect', Pool='GPU & ML design', ProjectID='PF-04', Holders=2, Backups=1, Country='Canada', Notes=None),
+        dict(RoleID='K-06', Role='Implementation methodology lead', Pool='Physical design', ProjectID=None, Holders=1, Backups=1, Country='India', Notes=None),
+        dict(RoleID='K-07', Role='Compiler back-end lead', Pool='Software & tools', ProjectID='PF-10', Holders=1, Backups=0, Country='Canada', Notes=None),
+        dict(RoleID='K-08', Role='Performance model owner', Pool='Performance modelling', ProjectID='PF-02', Holders=1, Backups=0, Country='US', Notes=None),
+    ]
     t['pf_capacity_changes'] = [
         dict(Pool='Verification', Month='2027-03', DeltaFTE=8, Reason='Hiring plan'),
         dict(Pool='Physical design', Month='2027-04', DeltaFTE=6, Reason='Hiring plan'),

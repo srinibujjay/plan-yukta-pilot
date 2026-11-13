@@ -221,6 +221,17 @@ Monthly buckets from the plan start for "Portfolio horizon months"; quarters fol
 - **Roadmap to silicon**: a project's LinkedSKU is checked against NPI Management's qualification date; the need date is the earlier of its own release and (dependent release − lag).
 - **Jira sync**: epics from the JQL plus every project's JiraKey; children by `parent = KEY`, counted by status category. **Confluence**: the board pack is created or updated (next version) as one page in the space.
 
+## 21a. FTE ramp-up, productivity and capacity risk
+
+- **Ramp factor** of a cohort in its k-th month (k = 0 first month) = start + (steady − start) × min(1, k ÷ ramp months), from FTE ramp-up profiles by type. Capacity changes map to types: Hiring plan → Permanent hire, Contractors → Contractor, Partner → Partner, Transfer → Transfer; scenario Add FTE → Contractor, Hire FTE → Permanent hire. Leavers (negative changes) leave at full output.
+- **Levers** apply to cohorts joining from their From month (Shorter ramp: ramp months − value; Higher start factor: start + value, capped at steady) or to the whole pool from that month (Productivity uplift %). Which statuses count is set in Plan settings.
+- **Effective FTE** = (existing FTE + Σ cohort FTE × factor) × (1 + Σ uplift). With ramp-up on, every capacity, funding, scenario and board result uses effective FTE; headcount is shown alongside.
+- **FTE-months lost per new person** = Σ over the ramp months of (steady − factor). Lever gain = effective FTE-months with the lever alone − without any lever; worth = gain × pool cost per FTE-month.
+- **Covering a gap**: people needed = gap FTE ÷ factor in the gap month after the option's lead time (permanent: pool hiring lead; contractor 1 month; partner 2; transfer 1); 12-month cost = people × pool cost × (1 + premium).
+- **Attrition drag** (risk-adjusted plan) = FTE × attrition % ÷ 12 × (hiring lead months + ramp months × (steady − (start + steady) ÷ 2)), taken off the pool from the plan start.
+- **Risk register**: attrition (P from the rate, I from the risk-adjusted peak gap ÷ pool FTE: ≥ 8% = 5, ≥ 4% = 4, ≥ 1.5% = 3); hiring lead time (requisitions must open by first over-target month − hiring lead − months to 80% output; already past = P5); ramp-up timing (a cohort below its steady output in an over-target month); contractor dependency (≥ 15% of effective capacity); site concentration (≥ 80% in one country); burnout (4+ consecutive months at or near target); key person (a key role with no backup; impact 5 on committed projects scoring ≥ 70).
+- **Stress tests**: attrition multiplier, hiring freeze (Hiring plan rows removed), contractors and partners leaving from a month, and losing a country's share of every pool from a month.
+
 ## 22. Data checks
 
 Errors and warnings that change or stop the plan: products without a flow or without qualified OSATs, test times without testers, bin fractions that do not add up to 1, unmapped WIP lots, missing prices, cross-flow rules over 100%, references to unknown products or vendors, test results that pass more than they test, closed issues without dates, NPI milestones past their readout without a status, QBR weights that do not add up to 100, portfolio rows that name unknown projects or pools, demand rows that end before they start, and projects that launch before they start.
