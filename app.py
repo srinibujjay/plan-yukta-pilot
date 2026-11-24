@@ -25,7 +25,7 @@ import markdown
 from flask import (Flask, Response, abort, jsonify, redirect, render_template, request, send_file,
                    send_from_directory, session, url_for)
 
-from plan_yukta import assistant, cockpit, exports, modules, views, pf_views, learn, integrations as IG
+from plan_yukta import assistant, quota, cockpit, exports, modules, views, pf_views, learn, integrations as IG
 from plan_yukta import workspace as W
 
 HERE = Path(__file__).parent
@@ -40,7 +40,6 @@ app.config['SESSION_COOKIE_HTTPONLY'] = True
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 app.config['SESSION_COOKIE_SECURE'] = os.environ.get('RENDER') == 'true'
 FEEDBACK_URL = os.environ.get('FEEDBACK_URL', '')
-CHAT_LIMIT = int(os.environ.get('CHAT_LIMIT_PER_HOUR', '30'))
 logging.basicConfig(level=logging.INFO)
 
 
@@ -230,6 +229,17 @@ PF_BUILDERS = {
 
 @app.get('/')
 def home():
+    """Landing page: the semiconductor chatbot. The sidebar is the same as on every other page."""
+    wsid, ws = ws_get()
+    R = results(wsid, ws)
+    q = quota.status(_quota_key(), session.get('tester'))
+    return render_template('ask.html', page={'title': 'Ask Yukta'}, key='home', R=R, ws=ws, badges=nav_badges(R),
+                           chat_context=None, args=request.args, next_key=None, quota=q, ai_on=assistant.ai_enabled(),
+                           landing=True)
+
+
+@app.get('/cockpit')
+def cockpit_page():
     wsid, ws = ws_get()
     R = results(wsid, ws)
     return render_page('home', views.home(R, request.args), R, ws, tour=modules.TOUR[:4])
@@ -1132,17 +1142,74 @@ def export(name):
 
 
 # ------------------------------------------------------------------ chat
+def _client_ip():
+    fwd = request.headers.get('X-Forwarded-For', '')
+    return fwd.split(',')[0].strip() if fwd else (request.remote_addr or '-')
+
+
+def _quota_key():
+    return quota.user_key(session.get('tester'), _client_ip())
+
+
+def _json_post_ok():
+    # JSON body only: a cross-site form cannot send application/json without a CORS preflight, which we never allow
+    return request.is_json and len(request.get_data(cache=True) or b'') <= 40_000
+
+
 @app.post('/api/chat')
 def chat():
+    """Floating help chat on module pages. Claude answers use the daily quota; help-search answers are free."""
+    if not _json_post_ok():
+        return jsonify({'error': 'Bad request.'}), 400
     payload = request.get_json(silent=True) or {}
-    now = time.time()
-    recent = [t for t in session.get('chat_times', []) if now - t < 3600]
-    if len(recent) >= CHAT_LIMIT:
-        return jsonify({'answer': f'You have reached {CHAT_LIMIT} questions this hour. Please try again later.', 'mode': 'limit'})
-    session['chat_times'] = recent + [now]
-    result = assistant.ask(payload.get('question', ''), payload.get('context', ''), payload.get('history') or [])
-    app.logger.info('PILOT chat tester=%s mode=%s', session.get('tester', '-'), result['mode'])
+    question, key, tester = payload.get('question', ''), _quota_key(), session.get('tester')
+    use_ai = assistant.ai_enabled() and str(question).strip() and quota.take(key, tester)[0]
+    if use_ai:
+        res = assistant.call_claude(assistant._system_prompt(str(payload.get('context', ''))[:6000]),
+                                    assistant._messages(str(question)[:800], payload.get('history') or []), 700)
+        if res:
+            app.logger.info('PILOT chat tester=%s mode=ai', tester or '-')
+            return jsonify({'answer': res['text'], 'mode': 'ai', 'quota': quota.status(key, tester)})
+        quota.refund(key)
+    result = assistant.ask(question, use_ai=False)
+    if use_ai is False and assistant.ai_enabled() and str(question).strip():
+        result['answer'] = "You have used today's AI questions, so this answer comes from the help pages.\n\n" + result['answer']
+    app.logger.info('PILOT chat tester=%s mode=%s', tester or '-', result['mode'])
     return jsonify(result)
+
+
+@app.post('/api/ask')
+def ask_api():
+    """Landing-page semiconductor chatbot: Claude, limited to CHAT_DAILY_LIMIT questions per user per day."""
+    if not _json_post_ok():
+        return jsonify({'error': 'Bad request.'}), 400
+    payload = request.get_json(silent=True) or {}
+    question = str(payload.get('question') or '').strip()[:1500]
+    key, tester = _quota_key(), session.get('tester')
+    if not question:
+        return jsonify({'answer': 'Type a question about semiconductors, supply chain or Plan Yukta.', 'mode': 'note',
+                        'quota': quota.status(key, tester)})
+    if not assistant.ai_enabled():
+        hits = assistant.ask(question, use_ai=False)
+        return jsonify({'answer': 'The AI assistant is switched off on this server (no API key set), so here is what the '
+                                  'Plan Yukta help says:\n\n' + hits['answer'], 'mode': 'help', 'quota': quota.status(key, tester)})
+    ok, why = quota.take(key, tester)
+    if not ok:
+        q = quota.status(key, tester)
+        msg = (f'You have used all {q["limit"]} questions for today. Your allowance resets at {q["resets"]}. '
+               'Meanwhile every page in the sidebar still works.') if why == 'user' else \
+              ('The pilot has reached its total question budget for today. Please try again tomorrow; the sidebar pages still work.')
+        app.logger.info('PILOT ask blocked tester=%s reason=%s', tester or '-', why)
+        return jsonify({'answer': msg, 'mode': 'limit', 'quota': q})
+    res = assistant.ask_expert(question, payload.get('history') or [])
+    if not res:
+        quota.refund(key)
+        return jsonify({'answer': 'The AI service did not answer just now, so this question was not counted. Please try again in a minute.',
+                        'mode': 'error', 'quota': quota.status(key, tester)})
+    u = res['usage']
+    app.logger.info('PILOT ask tester=%s in=%s cache_read=%s cache_write=%s out=%s', tester or '-', u.get('input_tokens'),
+                    u.get('cache_read_input_tokens'), u.get('cache_creation_input_tokens'), u.get('output_tokens'))
+    return jsonify({'answer': res['text'], 'mode': 'ai', 'quota': quota.status(key, tester)})
 
 
 # ------------------------------------------------------------------ lot-level WIP audit (upload)

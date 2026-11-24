@@ -69,7 +69,7 @@
     <footer class="foot">Plan Yukta pilot{% if tester %} · {{ tester }}{% endif %}. Demo data is synthetic: products, vendors, customers, lots and prices are invented. Your edits are private to your browser session and kept for 24 hours.</footer>
   </div>
 </div>
-{% if not access_on or tester %}
+{% if (not access_on or tester) and not landing %}
 <div id="py-chat" data-url="{{ url_for('chat') }}">
   <button class="chat-open btn" type="button" aria-label="Ask Plan Yukta">Ask Plan Yukta</button>
   <div class="chat-panel" hidden>

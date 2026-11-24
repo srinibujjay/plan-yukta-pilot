@@ -23,9 +23,15 @@ services:
         sync: false
       - key: FEEDBACK_URL      # optional: link to a feedback form, shown in the header
         sync: false
-      - key: ANTHROPIC_API_KEY # optional: turns the chat into an AI assistant; without it the chat searches the help
+      - key: ANTHROPIC_API_KEY # turns on the Ask Yukta chatbot (landing page) and the AI help chat; without it both use help search
         sync: false
       - key: CHAT_MODEL        # model used when ANTHROPIC_API_KEY is set
         value: claude-haiku-5-5
-      - key: CHAT_LIMIT_PER_HOUR
-        value: "30"
+      - key: CHAT_DAILY_LIMIT  # Claude answers per user per day (both chats together)
+        value: "10"
+      - key: CHAT_GLOBAL_DAILY_LIMIT # whole-site cap per day, a hard ceiling on the API bill
+        value: "200"
+      - key: CHAT_UNLIMITED    # optional: tester names not limited per day (still inside the site cap), e.g. srini
+        sync: false
+      - key: CHAT_TZ_OFFSET_MIN # day rolls over at midnight in this offset from UTC (330 = IST)
+        value: "330"

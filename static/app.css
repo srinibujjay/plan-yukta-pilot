@@ -409,3 +409,25 @@ pre.code { background: var(--panel2); border: 1px solid var(--line); border-radi
 .practice details > summary::-webkit-details-marker { display: none; }
 .practice .rate { margin-left: auto; display: inline-flex; gap: 6px; align-items: center; font-size: 12px; color: var(--muted); flex-wrap: wrap; }
 .practice .chip.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+/* landing chatbot */
+.ask { display: flex; flex-direction: column; gap: 12px; min-height: calc(100vh - 170px); max-width: 980px; margin: 0 auto; }
+.ask-head { display: flex; gap: 16px; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; }
+.ask-head h1 { margin: 0 0 4px; font-size: 26px; }
+.ask-head p { margin: 0; max-width: 620px; }
+.ask-side { display: flex; flex-direction: column; gap: 8px; align-items: flex-end; }
+.quota-pill { font-size: 12px; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--line2); background: var(--panel2); color: var(--ink2); white-space: nowrap; }
+.quota-pill.low { border-color: var(--warn); color: var(--warn); }
+.quota-pill.out { border-color: var(--bad); color: var(--bad); }
+.ask-log { flex: 1; min-height: 340px; max-height: calc(100vh - 330px); overflow-y: auto; display: flex; flex-direction: column; gap: 10px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
+.ask-log .msg { font-size: 14px; max-width: 86%; line-height: 1.55; }
+.ask-log .msg a { color: var(--accent2); }
+.ask-log .msg.me a { color: #fff; }
+.ask-log .msg h4 { margin: 6px 0 2px; font-size: 14px; }
+.ask-log .msg code { font-family: 'JetBrains Mono', monospace; font-size: 12px; background: var(--bg2); padding: 1px 4px; border-radius: 4px; }
+.ask-chips { margin: 2px 0 0; }
+.ask-form { display: flex; gap: 8px; }
+.ask-form textarea { flex: 1; resize: vertical; font-size: 14px; min-height: 48px; }
+.ask-foot { margin: 0; }
+@media (max-width: 640px) { .ask-side { align-items: flex-start; } .ask-log { max-height: none; } .ask-log .msg { max-width: 100%; } }

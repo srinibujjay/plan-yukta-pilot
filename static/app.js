@@ -61,47 +61,81 @@
     }));
   });
 
-  // chat
-  const root = $('#py-chat');
-  if (!root) return;
-  const panel = $('.chat-panel', root), log = $('.chat-log', root), form = $('form', root), input = $('textarea', form);
-  const ctxEl = $('#py-context');
-  const context = ctxEl ? ctxEl.textContent : '';
-  const history = [];
+  // chat: the floating help panel (#py-chat) and the landing-page chatbot (#py-ask) share this code
   const esc = t => t.replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
-  const render = t => esc(t).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>')
-    .split(/\n/).map(l => /^\s*[-•]\s+/.test(l) ? '<li>' + l.replace(/^\s*[-•]\s+/, '') + '</li>' : l).join('\n')
-    .replace(/(<li>.*<\/li>\n?)+/g, m => '<ul style="margin:4px 0;padding-left:18px">' + m.replace(/\n/g, '') + '</ul>')
-    .replace(/\n/g, '<br>');
-  const add = (role, text, mode) => {
-    const d = document.createElement('div');
-    d.className = 'msg ' + (role === 'user' ? 'me' : 'bot');
-    d.innerHTML = render(text) + (mode === 'help' ? '<div class="muted small" style="margin-top:4px">From the help pages</div>' : '');
-    log.appendChild(d);
-    log.scrollTop = log.scrollHeight;
-    return d;
-  };
-  $('.chat-open', root).addEventListener('click', () => { panel.hidden = !panel.hidden; if (!panel.hidden) input.focus(); });
-  $('.chat-close', root).addEventListener('click', () => { panel.hidden = true; });
-  $$('.chip', root).forEach(b => b.addEventListener('click', () => { input.value = b.textContent; form.requestSubmit(); }));
-  input.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); form.requestSubmit(); } });
-  form.addEventListener('submit', async e => {
-    e.preventDefault();
-    const q = input.value.trim();
-    if (!q) return;
-    input.value = '';
-    add('user', q);
-    const wait = add('bot', 'Thinking…');
-    try {
-      const r = await fetch(root.dataset.url, {method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({question: q, context: context, history: history.slice(-6)})});
-      const data = await r.json();
-      wait.remove();
-      add('bot', data.answer || data.error || 'Something went wrong.', data.mode);
-      history.push({role: 'user', text: q}, {role: 'assistant', text: data.answer || ''});
-    } catch (err) {
-      wait.remove();
-      add('bot', 'I could not reach the server. Check your connection and try again.');
+  const inline = t => t.replace(/`([^`]+)`/g, '<code>$1</code>').replace(/\*\*(.+?)\*\*/g, '<b>$1</b>')
+    .replace(/\[([^\]]+)\]\((\/[a-z0-9\-\/?=&amp;;]*)\)/gi, '<a href="$2">$1</a>');   // only links inside this site
+  const render = t => {
+    const out = []; let list = null;
+    for (const raw of esc(t).split('\n')) {
+      const b = raw.match(/^\s*(?:[-•*]|\d+[.)])\s+(.*)$/), h = raw.match(/^\s*#{1,4}\s+(.*)$/);
+      const kind = b ? (/^\s*\d/.test(raw) ? 'ol' : 'ul') : null;
+      if (list && kind !== list.kind) { out.push(`<${list.kind} style="margin:4px 0;padding-left:20px">${list.items.join('')}</${list.kind}>`); list = null; }
+      if (kind) { (list = list || {kind, items: []}).items.push('<li>' + inline(b[1]) + '</li>'); continue; }
+      out.push(h ? '<h4>' + inline(h[1]) + '</h4>' : inline(raw) + '\n');
     }
-  });
+    if (list) out.push(`<${list.kind} style="margin:4px 0;padding-left:20px">${list.items.join('')}</${list.kind}>`);
+    return out.join('').replace(/\n+$/, '').replace(/\n/g, '<br>').replace(/(<br>){2,}/g, '<br><br>');
+  };
+  const bindChat = (root, opts) => {
+    const log = $(opts.log, root), form = $('form', root), input = $('textarea', form), btn = $('button[type=submit]', form);
+    const history = [];
+    const add = (role, text, mode) => {
+      const d = document.createElement('div');
+      d.className = 'msg ' + (role === 'user' ? 'me' : 'bot');
+      d.style.whiteSpace = 'normal';
+      d.innerHTML = render(text) + (mode === 'help' ? '<div class="muted small" style="margin-top:4px">From the help pages</div>' : '');
+      log.appendChild(d);
+      log.scrollTop = log.scrollHeight;
+      return d;
+    };
+    $$('.chip', root).forEach(b => b.addEventListener('click', () => { input.value = b.textContent; form.requestSubmit(); }));
+    input.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); form.requestSubmit(); } });
+    form.addEventListener('submit', async e => {
+      e.preventDefault();
+      const q = input.value.trim();
+      if (!q || btn.disabled) return;
+      input.value = '';
+      btn.disabled = true;
+      add('user', q);
+      const wait = add('bot', 'Thinking…');
+      try {
+        const r = await fetch(root.dataset.url, {method: 'POST', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({question: q, context: opts.context || '', history: history.slice(-6)})});
+        const data = await r.json();
+        wait.remove();
+        add('bot', data.answer || data.error || 'Something went wrong.', data.mode);
+        if (data.mode === 'ai') history.push({role: 'user', text: q}, {role: 'assistant', text: data.answer || ''});
+        if (data.quota && opts.onQuota) opts.onQuota(data.quota);
+      } catch (err) {
+        wait.remove();
+        add('bot', 'I could not reach the server. Check your connection and try again.');
+      }
+      btn.disabled = false;
+      input.focus();
+    });
+    return input;
+  };
+
+  const ask = $('#py-ask');
+  if (ask) {
+    const pill = $('#ask-quota');
+    const showQuota = q => {
+      if (!pill || q.unlimited || q.left === null || q.left === undefined) return;
+      pill.textContent = q.left > 0 ? `${q.left} of ${q.limit} questions left today` : `No questions left today · resets ${q.resets}`;
+      pill.classList.toggle('low', q.left > 0 && q.left <= 3);
+      pill.classList.toggle('out', q.left === 0);
+    };
+    if (pill && pill.dataset.left !== '') { const n = +pill.dataset.left; pill.classList.toggle('low', n > 0 && n <= 3); pill.classList.toggle('out', n === 0); }
+    bindChat(ask, {log: '.ask-log', onQuota: showQuota}).focus();
+  }
+
+  const root = $('#py-chat');
+  if (root) {
+    const panel = $('.chat-panel', root);
+    const ctxEl = $('#py-context');
+    const input = bindChat(root, {log: '.chat-log', context: ctxEl ? ctxEl.textContent : ''});
+    $('.chat-open', root).addEventListener('click', () => { panel.hidden = !panel.hidden; if (!panel.hidden) input.focus(); });
+    $('.chat-close', root).addEventListener('click', () => { panel.hidden = true; });
+  }
 })();

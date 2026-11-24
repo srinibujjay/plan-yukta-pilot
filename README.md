@@ -77,7 +77,8 @@ Every formula is in [CALCULATIONS.md](CALCULATIONS.md), also shown in the app un
 | `plan_yukta/charts.py` | Server-rendered SVG charts |
 | `plan_yukta/modules.py` | Sidebar, module descriptions, demo tour |
 | `plan_yukta/exports.py` | B2B workbook, XML messages, full plan workbook |
-| `plan_yukta/assistant.py` | "Ask Plan Yukta" chat (help search, or Claude if `ANTHROPIC_API_KEY` is set) |
+| `plan_yukta/assistant.py` | Ask Yukta landing chatbot (semiconductor Q&A) and the "Ask Plan Yukta" help chat (help search, or Claude if `ANTHROPIC_API_KEY` is set) |
+| `plan_yukta/quota.py` | Daily Claude question quota per user (`CHAT_DAILY_LIMIT`, default 10) and site cap (`CHAT_GLOBAL_DAILY_LIMIT`) |
 | `plan_yukta/engine.py`, `osat_transfer_dedup.py`, `audit_view.py` | Lot-level WIP audit |
 | `templates/`, `static/` | Pages, styles (dark and light), scripts, audit template and sample |
 
@@ -94,6 +95,6 @@ python app.py            # http://127.0.0.1:5000
 
 ## Deploy on Render
 
-`render.yaml` is a Blueprint. Every push to `main` redeploys. Set `PILOT_ACCESS` to `name:code` pairs for invited testers (empty = open). Optional: `FEEDBACK_URL`, `ANTHROPIC_API_KEY`, and for a permanent Atlassian connection `ATLASSIAN_SITE`, `ATLASSIAN_EMAIL`, `ATLASSIAN_TOKEN`, `CONFLUENCE_SPACE`, `JIRA_EPIC_JQL`.
+`render.yaml` is a Blueprint. Every push to `main` redeploys. Set `PILOT_ACCESS` to `name:code` pairs for invited testers (empty = open). Optional: `FEEDBACK_URL`, `ANTHROPIC_API_KEY` (landing page `/` becomes the Ask Yukta chatbot; the cockpit dashboard is at `/cockpit`; limits `CHAT_DAILY_LIMIT`, `CHAT_GLOBAL_DAILY_LIMIT`, `CHAT_UNLIMITED`), and for a permanent Atlassian connection `ATLASSIAN_SITE`, `ATLASSIAN_EMAIL`, `ATLASSIAN_TOKEN`, `CONFLUENCE_SPACE`, `JIRA_EPIC_JQL`.
 
 Workspaces are small JSON files in `/tmp` (one per browser session, deleted after 24 hours). On Render's free instance they also disappear when the service restarts; testers keep their work by downloading the workspace from Import / Export.

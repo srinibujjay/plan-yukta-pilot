@@ -4,7 +4,7 @@
 {{ head(page) }}
 <div class="callout info">Plan Yukta plans a fabless semiconductor supply chain backwards from customer demand: finished goods → pack → final test (with tester capacity) → assembly → bump → wafer sort → fab wafer starts, at every OSAT. Every module below reads the same data tables, so a change anywhere flows everywhere.</div>
 <ol class="tour">
-  {% for k, t, txt in tour %}<li><b>{{ t }}</b><p>{{ txt }}</p><a class="btn ghost sm" href="{{ '/' if k == 'home' else ('/data' if k == 'data' else '/m/' ~ k) }}">Open {{ nav_label(k) }} →</a></li>{% endfor %}
+  {% for k, t, txt in tour %}<li><b>{{ t }}</b><p>{{ txt }}</p><a class="btn ghost sm" href="{{ '/cockpit' if k == 'home' else ('/data' if k == 'data' else '/m/' ~ k) }}">Open {{ nav_label(k) }} →</a></li>{% endfor %}
 </ol>
 <section class="panel" style="margin-top:16px">
   <h2>How the modules connect</h2>
