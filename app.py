@@ -25,7 +25,7 @@ import markdown
 from flask import (Flask, Response, abort, jsonify, redirect, render_template, request, send_file,
                    send_from_directory, session, url_for)
 
-from plan_yukta import assistant, quota, cockpit, exports, modules, views, pf_views, learn, integrations as IG
+from plan_yukta import assistant, quota, slm, cockpit, exports, modules, views, pf_views, learn, integrations as IG
 from plan_yukta import workspace as W
 
 HERE = Path(__file__).parent
@@ -229,13 +229,11 @@ PF_BUILDERS = {
 
 @app.get('/')
 def home():
-    """Landing page: the semiconductor chatbot. The sidebar is the same as on every other page."""
+    """Landing page: the Yukta Lite chatbot. The sidebar is the same as on every other page."""
     wsid, ws = ws_get()
     R = results(wsid, ws)
-    q = quota.status(_quota_key(), session.get('tester'))
     return render_template('ask.html', page={'title': 'Ask Yukta'}, key='home', R=R, ws=ws, badges=nav_badges(R),
-                           chat_context=None, args=request.args, next_key=None, quota=q, ai_on=assistant.ai_enabled(),
-                           landing=True)
+                           chat_context=None, args=request.args, next_key=None, landing=True)
 
 
 @app.get('/cockpit')
@@ -1171,7 +1169,9 @@ def chat():
             app.logger.info('PILOT chat tester=%s mode=ai', tester or '-')
             return jsonify({'answer': res['text'], 'mode': 'ai', 'quota': quota.status(key, tester)})
         quota.refund(key)
-    result = assistant.ask(question, use_ai=False)
+    wsid, ws = ws_get()
+    result = slm.answer(str(question), results(wsid, ws), ws)
+    result['mode'] = 'help'
     if use_ai is False and assistant.ai_enabled() and str(question).strip():
         result['answer'] = "You have used today's AI questions, so this answer comes from the help pages.\n\n" + result['answer']
     app.logger.info('PILOT chat tester=%s mode=%s', tester or '-', result['mode'])
@@ -1180,36 +1180,19 @@ def chat():
 
 @app.post('/api/ask')
 def ask_api():
-    """Landing-page semiconductor chatbot: Claude, limited to CHAT_DAILY_LIMIT questions per user per day."""
+    """Landing-page chatbot: Yukta Lite, a local engine over the visitor's own plan data and the help (no API, no cost).
+    With llm=true it also returns the facts for the optional on-device model running in the visitor's browser."""
     if not _json_post_ok():
         return jsonify({'error': 'Bad request.'}), 400
     payload = request.get_json(silent=True) or {}
-    question = str(payload.get('question') or '').strip()[:1500]
-    key, tester = _quota_key(), session.get('tester')
-    if not question:
-        return jsonify({'answer': 'Type a question about semiconductors, supply chain or Plan Yukta.', 'mode': 'note',
-                        'quota': quota.status(key, tester)})
-    if not assistant.ai_enabled():
-        hits = assistant.ask(question, use_ai=False)
-        return jsonify({'answer': 'The AI assistant is switched off on this server (no API key set), so here is what the '
-                                  'Plan Yukta help says:\n\n' + hits['answer'], 'mode': 'help', 'quota': quota.status(key, tester)})
-    ok, why = quota.take(key, tester)
-    if not ok:
-        q = quota.status(key, tester)
-        msg = (f'You have used all {q["limit"]} questions for today. Your allowance resets at {q["resets"]}. '
-               'Meanwhile every page in the sidebar still works.') if why == 'user' else \
-              ('The pilot has reached its total question budget for today. Please try again tomorrow; the sidebar pages still work.')
-        app.logger.info('PILOT ask blocked tester=%s reason=%s', tester or '-', why)
-        return jsonify({'answer': msg, 'mode': 'limit', 'quota': q})
-    res = assistant.ask_expert(question, payload.get('history') or [])
-    if not res:
-        quota.refund(key)
-        return jsonify({'answer': 'The AI service did not answer just now, so this question was not counted. Please try again in a minute.',
-                        'mode': 'error', 'quota': quota.status(key, tester)})
-    u = res['usage']
-    app.logger.info('PILOT ask tester=%s in=%s cache_read=%s cache_write=%s out=%s', tester or '-', u.get('input_tokens'),
-                    u.get('cache_read_input_tokens'), u.get('cache_creation_input_tokens'), u.get('output_tokens'))
-    return jsonify({'answer': res['text'], 'mode': 'ai', 'quota': quota.status(key, tester)})
+    question = str(payload.get('question') or '').strip()[:800]
+    wsid, ws = ws_get()
+    R = results(wsid, ws)
+    res = slm.answer(question, R, ws)
+    if payload.get('llm'):
+        res['context'] = slm.context_for_llm(question, R, ws) if question else ''
+    app.logger.info('PILOT ask tester=%s kind=%s llm=%s', session.get('tester', '-'), res.get('kind'), bool(payload.get('llm')))
+    return jsonify(res)
 
 
 # ------------------------------------------------------------------ lot-level WIP audit (upload)

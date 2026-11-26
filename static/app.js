@@ -84,7 +84,7 @@
       const d = document.createElement('div');
       d.className = 'msg ' + (role === 'user' ? 'me' : 'bot');
       d.style.whiteSpace = 'normal';
-      d.innerHTML = render(text) + (mode === 'help' ? '<div class="muted small" style="margin-top:4px">From the help pages</div>' : '');
+      d.innerHTML = render(text) + (mode === 'help' ? '<div class="muted small" style="margin-top:4px">Answered by Yukta Lite</div>' : '');
       log.appendChild(d);
       log.scrollTop = log.scrollHeight;
       return d;
@@ -117,18 +117,7 @@
     return input;
   };
 
-  const ask = $('#py-ask');
-  if (ask) {
-    const pill = $('#ask-quota');
-    const showQuota = q => {
-      if (!pill || q.unlimited || q.left === null || q.left === undefined) return;
-      pill.textContent = q.left > 0 ? `${q.left} of ${q.limit} questions left today` : `No questions left today · resets ${q.resets}`;
-      pill.classList.toggle('low', q.left > 0 && q.left <= 3);
-      pill.classList.toggle('out', q.left === 0);
-    };
-    if (pill && pill.dataset.left !== '') { const n = +pill.dataset.left; pill.classList.toggle('low', n > 0 && n <= 3); pill.classList.toggle('out', n === 0); }
-    bindChat(ask, {log: '.ask-log', onQuota: showQuota}).focus();
-  }
+  window.pyRender = render;
 
   const root = $('#py-chat');
   if (root) {

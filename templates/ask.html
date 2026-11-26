@@ -5,31 +5,36 @@
   <div class="ask-head">
     <div>
       <h1>Ask Yukta</h1>
-      <p class="muted">Ask anything about semiconductors: design, fab, OSAT, packaging, test, yield, NPI, supply chain planning, capacity and cost. Answers point you to the Plan Yukta page that shows it.</p>
+      <p class="muted">Ask about your plan (demand, tester load, wafer POs, holds, revenue, inventory, vendors, customers, NPI, portfolio), semiconductor terms, or how any page calculates. Answers link to the page that shows it.</p>
     </div>
     <div class="ask-side">
-      <span class="quota-pill" id="ask-quota" data-left="{{ quota.left if quota.left is not none else '' }}">
-        {% if not ai_on %}AI off on this server · help search only
-        {% elif quota.unlimited %}Unlimited questions
-        {% else %}{{ quota.left }} of {{ quota.limit }} questions left today{% endif %}</span>
+      <span class="quota-pill" id="ask-mode">Yukta Lite · free, unlimited</span>
       <a class="btn ghost sm" href="/cockpit">Open the planning cockpit →</a>
     </div>
   </div>
   <div class="ask-log" aria-live="polite">
-    <div class="msg bot">Hi{% if tester %} {{ tester }}{% endif %}. I'm Yukta, a semiconductor supply chain assistant. Pick a starter or type your own question.{% if ai_on and not quota.unlimited %} You get {{ quota.limit }} answers a day; the count resets at {{ quota.resets }}.{% endif %}</div>
+    <div class="msg bot" style="white-space:normal">Hi{% if tester %} {{ tester }}{% endif %}. I'm <b>Yukta Lite</b>, a small assistant built into Plan Yukta. I read this workspace's plan data and the help pages, and I know common semiconductor and supply chain terms. No AI service, so no cost and no limit. Pick a starter or type a question.</div>
     <div class="chips ask-chips">
-      <button class="chip" type="button">How do I size final test capacity for a new product?</button>
-      <button class="chip" type="button">What drives OSAT cycle time, and how do I cut it?</button>
-      <button class="chip" type="button">Explain chiplets, 2.5D and HBM supply risks</button>
-      <button class="chip" type="button">How should a fabless company set safety stock for die bank?</button>
-      <button class="chip" type="button">What is the difference between CP yield and FT yield?</button>
-      <button class="chip" type="button">How do I plan wafer starts inside fab lead time?</button>
+      <button class="chip" type="button">How is the plan?</button>
+      <button class="chip" type="button">Which OSAT is overloaded?</button>
+      <button class="chip" type="button">Which wafer POs are due?</button>
+      <button class="chip" type="button">Is NOVA at risk?</button>
+      <button class="chip" type="button">Vendor scorecard</button>
+      <button class="chip" type="button">Inventory health</button>
+      <button class="chip" type="button">Which skill pools are overloaded?</button>
+      <button class="chip" type="button">What is a die bank?</button>
+      <button class="chip" type="button">How is tester capacity calculated?</button>
     </div>
   </div>
   <form class="ask-form">
-    <textarea rows="2" maxlength="1500" placeholder="Ask about wafers, OSATs, testers, yield, NPI, capacity…" aria-label="Your question"></textarea>
+    <textarea rows="2" maxlength="800" placeholder="Ask about demand, testers, wafers, yield, OSATs, NPI…" aria-label="Your question"></textarea>
     <button class="btn" type="submit">Ask</button>
   </form>
-  <p class="muted small ask-foot">AI answers can be wrong or out of date: check anything important. Don't paste confidential company data. Plan Yukta's own data is synthetic.</p>
+  <div class="ask-llm">
+    <label class="small"><input type="checkbox" id="llm-toggle"> <b>On-device AI (beta)</b>: let a small language model (Qwen2.5 0.5B) write fuller answers, running in your own browser.</label>
+    <span class="muted small" id="llm-status">One-time download of about 400 MB, then cached. Needs Chrome or Edge with WebGPU on a laptop or recent phone. Nothing leaves your device.</span>
+  </div>
+  <p class="muted small ask-foot">Yukta Lite answers from the data and help in this workspace. On-device AI answers can be wrong: check numbers against the linked page. Demo data is synthetic.</p>
 </section>
 {% endblock %}
+{% block scripts %}<script type="module" src="{{ url_for('static', filename='ask.js') }}"></script>{% endblock %}

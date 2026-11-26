@@ -23,7 +23,7 @@ services:
         sync: false
       - key: FEEDBACK_URL      # optional: link to a feedback form, shown in the header
         sync: false
-      - key: ANTHROPIC_API_KEY # turns on the Ask Yukta chatbot (landing page) and the AI help chat; without it both use help search
+      - key: ANTHROPIC_API_KEY # optional: Claude for the floating help chat on module pages; the landing chatbot (Yukta Lite) never needs it
         sync: false
       - key: CHAT_MODEL        # model used when ANTHROPIC_API_KEY is set
         value: claude-haiku-5-5
